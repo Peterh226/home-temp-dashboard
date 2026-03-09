@@ -1,0 +1,627 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Home Temp Monitor</title>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Barlow:wght@300;400;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0d0f12;
+    --panel: #13161b;
+    --border: #1e2330;
+    --accent: #00e5ff;
+    --accent2: #ff6b35;
+    --warm: #ff9f43;
+    --cool: #48dbfb;
+    --text: #c8d0e0;
+    --muted: #4a5568;
+    --hot: #ff4757;
+    --cold: #48dbfb;
+    --ok: #2ed573;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Barlow', sans-serif;
+    min-height: 100vh;
+    padding: 0;
+    overflow-x: hidden;
+  }
+
+  /* Scanline overlay */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0,0,0,0.03) 2px,
+      rgba(0,0,0,0.03) 4px
+    );
+    pointer-events: none;
+    z-index: 1000;
+  }
+
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 18px 32px;
+    border-bottom: 1px solid var(--border);
+    background: var(--panel);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+
+  .logo {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .logo-icon {
+    width: 32px;
+    height: 32px;
+    border: 2px solid var(--accent);
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    color: var(--accent);
+    box-shadow: 0 0 12px rgba(0,229,255,0.3);
+  }
+
+  .logo h1 {
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: #fff;
+  }
+
+  .logo p {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 10px;
+    color: var(--muted);
+    letter-spacing: 0.08em;
+  }
+
+  .header-right {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+  }
+
+  .status-dot {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    color: var(--muted);
+  }
+
+  .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--ok);
+    box-shadow: 0 0 8px var(--ok);
+    animation: pulse 2s infinite;
+  }
+
+  .dot.offline { background: var(--hot); box-shadow: 0 0 8px var(--hot); animation: none; }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+
+  #last-update {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    color: var(--muted);
+  }
+
+  main {
+    padding: 28px 32px;
+    max-width: 1400px;
+    margin: 0 auto;
+  }
+
+  .section-label {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 14px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .section-label::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+  }
+
+  /* Room cards grid */
+  #room-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 14px;
+    margin-bottom: 36px;
+  }
+
+  .room-card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 20px;
+    position: relative;
+    overflow: hidden;
+    cursor: pointer;
+    transition: border-color 0.2s, transform 0.15s;
+  }
+
+  .room-card:hover {
+    transform: translateY(-2px);
+    border-color: var(--accent);
+  }
+
+  .room-card.selected {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent), inset 0 0 30px rgba(0,229,255,0.03);
+  }
+
+  .room-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: var(--card-color, var(--accent));
+    opacity: 0.7;
+  }
+
+  .room-card .room-name {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 12px;
+  }
+
+  .room-card .temp-display {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 42px;
+    font-weight: 400;
+    color: #fff;
+    line-height: 1;
+    margin-bottom: 4px;
+  }
+
+  .room-card .temp-unit {
+    font-size: 18px;
+    color: var(--muted);
+  }
+
+  .room-card .temp-status {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin-top: 10px;
+    padding: 3px 8px;
+    border-radius: 3px;
+    display: inline-block;
+  }
+
+  .status-hot { background: rgba(255,71,87,0.15); color: var(--hot); }
+  .status-warm { background: rgba(255,159,67,0.15); color: var(--warm); }
+  .status-ok { background: rgba(46,213,115,0.15); color: var(--ok); }
+  .status-cool { background: rgba(72,219,251,0.15); color: var(--cool); }
+
+  .room-card .last-seen {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 9px;
+    color: var(--muted);
+    margin-top: 8px;
+  }
+
+  /* No rooms placeholder */
+  .no-rooms {
+    grid-column: 1/-1;
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--muted);
+  }
+
+  .no-rooms .big-icon { font-size: 48px; margin-bottom: 16px; }
+  .no-rooms h3 { font-size: 16px; font-weight: 600; margin-bottom: 8px; color: var(--text); }
+  .no-rooms p { font-size: 13px; line-height: 1.6; }
+  .no-rooms code {
+    font-family: 'Share Tech Mono', monospace;
+    background: var(--border);
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 12px;
+    color: var(--accent);
+  }
+
+  /* Chart section */
+  #chart-section {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 24px;
+  }
+
+  .chart-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 20px;
+  }
+
+  #chart-title {
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #fff;
+  }
+
+  #chart-subtitle {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 10px;
+    color: var(--muted);
+    margin-top: 2px;
+  }
+
+  .chart-wrap {
+    position: relative;
+    height: 220px;
+  }
+
+  canvas#chart {
+    width: 100% !important;
+    height: 220px !important;
+  }
+
+  /* ESP32 code hint */
+  .esp-hint {
+    margin-top: 36px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 20px 24px;
+  }
+
+  .esp-hint h3 {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 12px;
+  }
+
+  .esp-hint pre {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    color: #a0aec0;
+    line-height: 1.7;
+    overflow-x: auto;
+    white-space: pre;
+  }
+
+  .esp-hint .kw { color: #ff79c6; }
+  .esp-hint .str { color: #f1fa8c; }
+  .esp-hint .cm { color: #6272a4; }
+  .esp-hint .fn { color: #50fa7b; }
+  .esp-hint .num { color: #bd93f9; }
+
+  /* Demo button */
+  .demo-btn {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    padding: 6px 14px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .demo-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  .empty-chart {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 220px;
+    color: var(--muted);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 12px;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <div class="logo-icon">🌡</div>
+    <div>
+      <h1>Home Temp Monitor</h1>
+      <p>ESP32 / ESP8266 SENSOR NETWORK</p>
+    </div>
+  </div>
+  <div class="header-right">
+    <div class="status-dot">
+      <div class="dot" id="status-dot"></div>
+      <span id="status-text">LISTENING</span>
+    </div>
+    <div id="last-update">—</div>
+    <button class="demo-btn" onclick="injectDemoData()">DEMO DATA</button>
+  </div>
+</header>
+
+<main>
+  <div class="section-label">Current Readings</div>
+  <div id="room-grid">
+    <div class="no-rooms">
+      <div class="big-icon">📡</div>
+      <h3>Waiting for sensors...</h3>
+      <p>Send data from your ESP32 via HTTP POST to <code>http://localhost:3000/data</code><br>
+      or click <strong>DEMO DATA</strong> to preview the dashboard.</p>
+    </div>
+  </div>
+
+  <div class="section-label">Temperature History</div>
+  <div id="chart-section">
+    <div class="chart-header">
+      <div>
+        <div id="chart-title">Select a room above</div>
+        <div id="chart-subtitle">Click any room card to view its history</div>
+      </div>
+    </div>
+    <div class="chart-wrap">
+      <div class="empty-chart" id="empty-chart">NO ROOM SELECTED</div>
+      <canvas id="chart" style="display:none;"></canvas>
+    </div>
+  </div>
+
+  <div class="esp-hint">
+    <h3>ESP32 / ESP8266 Arduino Snippet</h3>
+    <pre><span class="kw">#include</span> <span class="str">&lt;WiFi.h&gt;</span>
+<span class="kw">#include</span> <span class="str">&lt;HTTPClient.h&gt;</span>
+
+<span class="kw">const char</span>* ssid     = <span class="str">"YOUR_WIFI"</span>;
+<span class="kw">const char</span>* password = <span class="str">"YOUR_PASSWORD"</span>;
+<span class="kw">const char</span>* server   = <span class="str">"http://YOUR_PC_IP:3000/data"</span>;
+<span class="kw">const char</span>* roomName = <span class="str">"Living Room"</span>;  <span class="cm">// change per device</span>
+
+<span class="cm">// In your loop():</span>
+<span class="kw">float</span> tempF = <span class="fn">readSensor</span>();  <span class="cm">// your DHT22/DS18B20 read</span>
+
+HTTPClient http;
+http.<span class="fn">begin</span>(server);
+http.<span class="fn">addHeader</span>(<span class="str">"Content-Type"</span>, <span class="str">"application/json"</span>);
+
+String body = <span class="str">"{"</span>;
+body += <span class="str">'"room":"'</span> + String(roomName) + <span class="str">'",'</span>;
+body += <span class="str">'"temp":'</span>  + String(tempF);
+body += <span class="str">"}"</span>;
+
+<span class="kw">int</span> code = http.<span class="fn">POST</span>(body);
+http.<span class="fn">end</span>();
+<span class="fn">delay</span>(<span class="num">30000</span>);  <span class="cm">// send every 30 seconds</span></pre>
+  </div>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<script>
+  let roomData = {};
+  let selectedRoom = null;
+  let chart = null;
+
+  const ROOM_COLORS = [
+    '#00e5ff','#ff6b35','#ff9f43','#a29bfe',
+    '#fd79a8','#55efc4','#fdcb6e','#74b9ff'
+  ];
+  let colorMap = {};
+  let colorIdx = 0;
+
+  function getColor(room) {
+    if (!colorMap[room]) {
+      colorMap[room] = ROOM_COLORS[colorIdx % ROOM_COLORS.length];
+      colorIdx++;
+    }
+    return colorMap[room];
+  }
+
+  function tempStatus(t) {
+    if (t >= 80) return { label: 'HOT', cls: 'status-hot' };
+    if (t >= 74) return { label: 'WARM', cls: 'status-warm' };
+    if (t >= 65) return { label: 'GOOD', cls: 'status-ok' };
+    return { label: 'COOL', cls: 'status-cool' };
+  }
+
+  function timeAgo(ts) {
+    const s = Math.floor((Date.now() - ts) / 1000);
+    if (s < 60) return `${s}s ago`;
+    if (s < 3600) return `${Math.floor(s/60)}m ago`;
+    return `${Math.floor(s/3600)}h ago`;
+  }
+
+  function renderCards() {
+    const grid = document.getElementById('room-grid');
+    const rooms = Object.keys(roomData);
+
+    if (rooms.length === 0) {
+      grid.innerHTML = `<div class="no-rooms">
+        <div class="big-icon">📡</div>
+        <h3>Waiting for sensors...</h3>
+        <p>Send data from your ESP32 via HTTP POST to <code>http://localhost:3000/data</code><br>
+        or click <strong>DEMO DATA</strong> to preview the dashboard.</p>
+      </div>`;
+      return;
+    }
+
+    grid.innerHTML = rooms.map(room => {
+      const readings = roomData[room];
+      const latest = readings[readings.length - 1];
+      const color = getColor(room);
+      const status = tempStatus(latest.temp);
+      const selected = room === selectedRoom ? 'selected' : '';
+      return `
+        <div class="room-card ${selected}" style="--card-color:${color}" onclick="selectRoom('${room}')">
+          <div class="room-name">${room}</div>
+          <div class="temp-display">${latest.temp.toFixed(1)}<span class="temp-unit">°F</span></div>
+          <div class="temp-status ${status.cls}">${status.label}</div>
+          <div class="last-seen">UPDATED ${timeAgo(latest.timestamp)}</div>
+        </div>`;
+    }).join('');
+  }
+
+  function selectRoom(room) {
+    selectedRoom = room;
+    renderCards();
+    renderChart();
+  }
+
+  function renderChart() {
+    const canvas = document.getElementById('chart');
+    const empty = document.getElementById('empty-chart');
+
+    if (!selectedRoom || !roomData[selectedRoom]) {
+      canvas.style.display = 'none';
+      empty.style.display = 'flex';
+      return;
+    }
+
+    canvas.style.display = 'block';
+    empty.style.display = 'none';
+
+    const readings = roomData[selectedRoom];
+    const labels = readings.map(r => {
+      const d = new Date(r.timestamp);
+      return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    });
+    const data = readings.map(r => r.temp);
+    const color = getColor(selectedRoom);
+
+    document.getElementById('chart-title').textContent = selectedRoom.toUpperCase();
+    document.getElementById('chart-subtitle').textContent = `${readings.length} readings · Last: ${data[data.length-1].toFixed(1)}°F`;
+
+    if (chart) chart.destroy();
+
+    chart = new Chart(canvas.getContext('2d'), {
+      type: 'line',
+      data: {
+        labels,
+        datasets: [{
+          data,
+          borderColor: color,
+          backgroundColor: color + '18',
+          borderWidth: 2,
+          pointRadius: readings.length > 30 ? 0 : 3,
+          pointBackgroundColor: color,
+          tension: 0.3,
+          fill: true,
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: { duration: 300 },
+        plugins: { legend: { display: false }, tooltip: {
+          backgroundColor: '#13161b',
+          borderColor: '#1e2330',
+          borderWidth: 1,
+          titleColor: '#c8d0e0',
+          bodyColor: color,
+          titleFont: { family: 'Share Tech Mono', size: 10 },
+          bodyFont: { family: 'Share Tech Mono', size: 13 },
+          callbacks: { label: ctx => ` ${ctx.parsed.y.toFixed(1)}°F` }
+        }},
+        scales: {
+          x: {
+            ticks: { color: '#4a5568', font: { family: 'Share Tech Mono', size: 9 }, maxTicksLimit: 8 },
+            grid: { color: '#1e2330' },
+            border: { color: '#1e2330' }
+          },
+          y: {
+            ticks: { color: '#4a5568', font: { family: 'Share Tech Mono', size: 9 }, callback: v => v + '°F' },
+            grid: { color: '#1e2330' },
+            border: { color: '#1e2330' }
+          }
+        }
+      }
+    });
+  }
+
+  async function fetchData() {
+    try {
+      const res = await fetch('/rooms');
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+      roomData = data;
+
+      document.getElementById('status-dot').className = 'dot';
+      document.getElementById('status-text').textContent = 'LIVE';
+      document.getElementById('last-update').textContent =
+        'REFRESHED ' + new Date().toLocaleTimeString();
+
+      renderCards();
+      if (selectedRoom) renderChart();
+    } catch {
+      document.getElementById('status-dot').className = 'dot offline';
+      document.getElementById('status-text').textContent = 'OFFLINE';
+    }
+  }
+
+  // Demo data for preview
+  function injectDemoData() {
+    const rooms = ['Living Room', 'Master Bedroom', 'Kitchen', 'Garage', 'Office'];
+    const baseTemps = [71, 68, 74, 82, 70];
+    const now = Date.now();
+
+    rooms.forEach((room, i) => {
+      roomData[room] = [];
+      for (let j = 40; j >= 0; j--) {
+        roomData[room].push({
+          temp: baseTemps[i] + (Math.random() - 0.5) * 4,
+          timestamp: now - j * 30000
+        });
+      }
+    });
+
+    renderCards();
+    if (!selectedRoom) selectRoom(rooms[0]);
+    else renderChart();
+  }
+
+  // Poll every 10 seconds
+  fetchData();
+  setInterval(fetchData, 10000);
+</script>
+</body>
+</html>
