@@ -65,9 +65,40 @@ const server = http.createServer((req, res) => {
   res.end('Not found');
 });
 
+// Demo mode: generate fake data when started with --demo
+function startDemo() {
+  const rooms = ['Living Room', 'Bedroom', 'Kitchen', 'Garage'];
+  const baselines = [72, 70, 74, 62];
+
+  // Seed 20 historical readings per room (spaced 30s apart)
+  const now = Date.now();
+  rooms.forEach((room, i) => {
+    roomData[room] = [];
+    for (let j = 19; j >= 0; j--) {
+      roomData[room].push({
+        temp: parseFloat((baselines[i] + (Math.random() - 0.5) * 4).toFixed(1)),
+        timestamp: now - j * 30000
+      });
+    }
+  });
+  console.log('Demo mode: seeded data for', rooms.join(', '));
+
+  // Continue generating a reading per room every 30s
+  setInterval(() => {
+    rooms.forEach((room, i) => {
+      const last = roomData[room][roomData[room].length - 1].temp;
+      const temp = parseFloat((last + (Math.random() - 0.5) * 2).toFixed(1));
+      roomData[room].push({ temp, timestamp: Date.now() });
+      if (roomData[room].length > MAX_HISTORY) roomData[room].shift();
+      console.log(`[${new Date().toLocaleTimeString()}] ${room}: ${temp}°F (demo)`);
+    });
+  }, 30000);
+}
+
 const PORT = 3000;
 server.listen(PORT, () => {
-  console.log(`\n🌡️  Temperature Dashboard running at http://localhost:${PORT}`);
-  console.log(`📡  ESP32/ESP8266 POST endpoint: http://YOUR_PC_IP:${PORT}/data`);
+  console.log(`\n  Temperature Dashboard running at http://localhost:${PORT}`);
+  console.log(`  ESP32/ESP8266 POST endpoint: http://YOUR_PC_IP:${PORT}/data`);
   console.log(`    Payload format: { "room": "Living Room", "temp": 72.5 }\n`);
+  if (process.argv.includes('--demo')) startDemo();
 });

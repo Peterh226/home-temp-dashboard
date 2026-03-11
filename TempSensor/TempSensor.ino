@@ -3,11 +3,8 @@
 #include <WiFiClient.h>
 #include <DHT.h>
 
-// ── Config ────────────────────────────────────────────
-const char* ssid      = "YOUR_WIFI_SSID";
-const char* password  = "YOUR_WIFI_PASSWORD";
-const char* serverURL = "http://YOUR_PC_IP:3000/data";  // e.g. http://192.168.1.42:3000/data
-const char* roomName  = "Living Room";                   // Change this per device
+// ── Config (edit config.h with your credentials) ─────
+#include "config.h"
 
 #define DHTPIN  4       // GPIO4 = D2 on most ESP8266 boards
 #define DHTTYPE DHT22
