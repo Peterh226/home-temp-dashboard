@@ -1,10 +1,20 @@
 const http = require('http');
+const https = require('https');
 const fs = require('fs');
 const path = require('path');
 
 // In-memory store: { roomName: [{temp, timestamp}] }
 const roomData = {};
 const MAX_HISTORY = 100; // keep last 100 readings per room
+
+// Ambient Weather API config (loaded from server-config.json if present)
+let ambientConfig = null;
+try {
+  ambientConfig = JSON.parse(fs.readFileSync(path.join(__dirname, 'server-config.json'), 'utf8')).ambientWeather;
+  if (ambientConfig) console.log('Ambient Weather integration enabled');
+} catch (e) {
+  // No config file — Ambient Weather polling disabled
+}
 
 const server = http.createServer((req, res) => {
   // CORS headers
@@ -95,10 +105,58 @@ function startDemo() {
   }, 30000);
 }
 
+// Ambient Weather poller
+function fetchAmbientWeather() {
+  if (!ambientConfig) return;
+  const url = `https://rt.ambientweather.net/v1/devices?applicationKey=${ambientConfig.applicationKey}&apiKey=${ambientConfig.apiKey}`;
+
+  https.get(url, (res) => {
+    let body = '';
+    res.on('data', chunk => body += chunk);
+    res.on('end', () => {
+      try {
+        const devices = JSON.parse(body);
+        if (!Array.isArray(devices) || devices.length === 0) return;
+
+        const d = devices[0].lastData;
+        const now = Date.now();
+
+        // Outdoor temperature
+        if (d.tempf !== undefined) {
+          const room = 'Outside';
+          if (!roomData[room]) roomData[room] = [];
+          roomData[room].push({ temp: parseFloat(d.tempf), timestamp: now });
+          if (roomData[room].length > MAX_HISTORY) roomData[room].shift();
+          console.log(`[${new Date().toLocaleTimeString()}] ${room}: ${d.tempf}°F (ambient)`);
+        }
+
+        // Indoor temperature (from base station)
+        if (d.tempinf !== undefined) {
+          const room = 'Weather Station Indoor';
+          if (!roomData[room]) roomData[room] = [];
+          roomData[room].push({ temp: parseFloat(d.tempinf), timestamp: now });
+          if (roomData[room].length > MAX_HISTORY) roomData[room].shift();
+          console.log(`[${new Date().toLocaleTimeString()}] ${room}: ${d.tempinf}°F (ambient)`);
+        }
+      } catch (e) {
+        console.error('Ambient Weather parse error:', e.message);
+      }
+    });
+  }).on('error', (e) => {
+    console.error('Ambient Weather fetch error:', e.message);
+  });
+}
+
 const PORT = 3000;
 server.listen(PORT, () => {
   console.log(`\n  Temperature Dashboard running at http://localhost:${PORT}`);
   console.log(`  ESP32/ESP8266 POST endpoint: http://YOUR_PC_IP:${PORT}/data`);
   console.log(`    Payload format: { "room": "Living Room", "temp": 72.5 }\n`);
   if (process.argv.includes('--demo')) startDemo();
+
+  // Start Ambient Weather polling (every 60s — API rate limit is 1/sec)
+  if (ambientConfig) {
+    fetchAmbientWeather();
+    setInterval(fetchAmbientWeather, 60000);
+  }
 });
