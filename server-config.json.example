@@ -2,5 +2,8 @@
   "ambientWeather": {
     "apiKey": "YOUR_AMBIENT_WEATHER_API_KEY",
     "applicationKey": "YOUR_AMBIENT_WEATHER_APPLICATION_KEY"
+  },
+  "beestat": {
+    "apiKey": "YOUR_BEESTAT_API_KEY"
   }
 }

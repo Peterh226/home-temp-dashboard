@@ -7,14 +7,21 @@ const path = require('path');
 const roomData = {};
 const MAX_HISTORY = 100; // keep last 100 readings per room
 
-// Ambient Weather API config (loaded from server-config.json if present)
+// Load config (API keys for integrations)
 let ambientConfig = null;
+let beestatConfig = null;
 try {
-  ambientConfig = JSON.parse(fs.readFileSync(path.join(__dirname, 'server-config.json'), 'utf8')).ambientWeather;
+  const config = JSON.parse(fs.readFileSync(path.join(__dirname, 'server-config.json'), 'utf8'));
+  ambientConfig = config.ambientWeather || null;
+  beestatConfig = config.beestat || null;
   if (ambientConfig) console.log('Ambient Weather integration enabled');
+  if (beestatConfig) console.log('Beestat/Ecobee integration enabled');
 } catch (e) {
-  // No config file — Ambient Weather polling disabled
+  // No config file — integrations disabled
 }
+
+// Ecobee data (separate from room temps — includes setpoint and program)
+let ecobeeData = null;
 
 const server = http.createServer((req, res) => {
   // CORS headers
@@ -54,6 +61,13 @@ const server = http.createServer((req, res) => {
   if (req.method === 'GET' && req.url === '/rooms') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(roomData));
+    return;
+  }
+
+  // GET /ecobee — returns thermostat setpoint, program, and sensor data
+  if (req.method === 'GET' && req.url === '/ecobee') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(ecobeeData || {}));
     return;
   }
 
@@ -147,6 +161,70 @@ function fetchAmbientWeather() {
   });
 }
 
+// Beestat/Ecobee poller
+function beestatRequest(resource, method) {
+  return new Promise((resolve, reject) => {
+    const url = `https://api.beestat.io/?api_key=${beestatConfig.apiKey}&resource=${resource}&method=${method}&arguments=%7B%7D`;
+    https.get(url, (res) => {
+      let body = '';
+      res.on('data', chunk => body += chunk);
+      res.on('end', () => {
+        try {
+          const json = JSON.parse(body);
+          if (json.success) resolve(json.data);
+          else reject(new Error(json.data?.error_message || 'Beestat API error'));
+        } catch (e) { reject(e); }
+      });
+    }).on('error', reject);
+  });
+}
+
+async function fetchBeestat() {
+  if (!beestatConfig) return;
+  try {
+    // Sync first to get fresh data
+    await beestatRequest('thermostat', 'sync');
+    await beestatRequest('sensor', 'sync');
+
+    // Small delay to let sync complete
+    await new Promise(r => setTimeout(r, 1000));
+
+    const thermostats = await beestatRequest('thermostat', 'read_id');
+    const sensors = await beestatRequest('sensor', 'read_id');
+
+    const now = Date.now();
+
+    // Process thermostat data (setpoint, program)
+    const tId = Object.keys(thermostats)[0];
+    if (tId) {
+      const t = thermostats[tId];
+      ecobeeData = {
+        name: t.name,
+        temperature: t.temperature,
+        humidity: t.humidity,
+        setpoint_heat: t.setpoint_heat,
+        setpoint_cool: t.setpoint_cool,
+        program: t.program?.currentClimateRef || null,
+        timestamp: now
+      };
+      console.log(`[${new Date().toLocaleTimeString()}] Ecobee: ${t.temperature}°F, setpoint heat:${t.setpoint_heat} cool:${t.setpoint_cool}, program:${ecobeeData.program}`);
+    }
+
+    // Process sensor data — add each as a room
+    for (const sId of Object.keys(sensors)) {
+      const s = sensors[sId];
+      if (s.temperature === null) continue;
+      const room = `Ecobee: ${s.name}`;
+      if (!roomData[room]) roomData[room] = [];
+      roomData[room].push({ temp: parseFloat(s.temperature), timestamp: now });
+      if (roomData[room].length > MAX_HISTORY) roomData[room].shift();
+      console.log(`[${new Date().toLocaleTimeString()}] ${room}: ${s.temperature}°F (beestat)`);
+    }
+  } catch (e) {
+    console.error('Beestat fetch error:', e.message);
+  }
+}
+
 const PORT = 3000;
 server.listen(PORT, () => {
   console.log(`\n  Temperature Dashboard running at http://localhost:${PORT}`);
@@ -154,9 +232,15 @@ server.listen(PORT, () => {
   console.log(`    Payload format: { "room": "Living Room", "temp": 72.5 }\n`);
   if (process.argv.includes('--demo')) startDemo();
 
-  // Start Ambient Weather polling (every 60s — API rate limit is 1/sec)
+  // Start Ambient Weather polling (every 60s)
   if (ambientConfig) {
     fetchAmbientWeather();
     setInterval(fetchAmbientWeather, 60000);
+  }
+
+  // Start Beestat/Ecobee polling (every 3 min — ecobee data updates every 3 min)
+  if (beestatConfig) {
+    fetchBeestat();
+    setInterval(fetchBeestat, 180000);
   }
 });
