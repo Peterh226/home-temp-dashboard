@@ -260,8 +260,8 @@
     color: var(--accent);
   }
 
-  /* Chart section */
-  #chart-section {
+  /* Chart sections */
+  #chart-section, #all-chart-section {
     background: var(--panel);
     border: 1px solid var(--border);
     border-radius: 8px;
@@ -275,7 +275,7 @@
     margin-bottom: 20px;
   }
 
-  #chart-title {
+  #chart-title, #all-chart-title {
     font-size: 13px;
     font-weight: 700;
     letter-spacing: 0.08em;
@@ -283,7 +283,7 @@
     color: #fff;
   }
 
-  #chart-subtitle {
+  #chart-subtitle, #all-chart-subtitle {
     font-family: 'Share Tech Mono', monospace;
     font-size: 10px;
     color: var(--muted);
@@ -295,7 +295,7 @@
     height: 220px;
   }
 
-  canvas#chart {
+  canvas#chart, canvas#all-chart {
     width: 100% !important;
     height: 220px !important;
   }
@@ -375,6 +375,20 @@
     </div>
   </div>
 
+  <div class="section-label" style="margin-top:36px;">All Rooms</div>
+  <div id="all-chart-section" class="chart-section-panel">
+    <div class="chart-header">
+      <div>
+        <div id="all-chart-title">ALL ROOMS</div>
+        <div id="all-chart-subtitle">Temperature comparison across all sources</div>
+      </div>
+    </div>
+    <div class="chart-wrap">
+      <div class="empty-chart" id="all-empty-chart">WAITING FOR DATA</div>
+      <canvas id="all-chart" style="display:none;"></canvas>
+    </div>
+  </div>
+
 </main>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
@@ -382,6 +396,7 @@
   let roomData = {};
   let selectedRoom = null;
   let chart = null;
+  let allChart = null;
 
   const ROOM_COLORS = [
     '#00e5ff','#ff6b35','#ff9f43','#a29bfe',
@@ -519,6 +534,96 @@
     });
   }
 
+  function renderAllChart() {
+    const canvas = document.getElementById('all-chart');
+    const empty = document.getElementById('all-empty-chart');
+    const rooms = Object.keys(roomData);
+
+    if (rooms.length === 0) {
+      canvas.style.display = 'none';
+      empty.style.display = 'flex';
+      return;
+    }
+
+    canvas.style.display = 'block';
+    empty.style.display = 'none';
+
+    // Build a common set of time labels from the room with the most readings
+    let maxRoom = rooms[0];
+    rooms.forEach(r => {
+      if (roomData[r].length > roomData[maxRoom].length) maxRoom = r;
+    });
+    const labels = roomData[maxRoom].map(r => {
+      const d = new Date(r.timestamp);
+      return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    });
+
+    const datasets = rooms.map(room => {
+      const color = getColor(room);
+      const data = roomData[room].map(r => r.temp);
+      // Pad shorter arrays with null at the front so they align to the right
+      const padded = new Array(labels.length - data.length).fill(null).concat(data);
+      return {
+        label: room,
+        data: padded,
+        borderColor: color,
+        backgroundColor: 'transparent',
+        borderWidth: 1.5,
+        pointRadius: 0,
+        tension: 0.3,
+      };
+    });
+
+    document.getElementById('all-chart-subtitle').textContent =
+      `${rooms.length} sources · Updated ${new Date().toLocaleTimeString()}`;
+
+    if (allChart) allChart.destroy();
+
+    allChart = new Chart(canvas.getContext('2d'), {
+      type: 'line',
+      data: { labels, datasets },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: { duration: 300 },
+        plugins: {
+          legend: {
+            display: true,
+            position: 'top',
+            labels: {
+              color: '#4a5568',
+              font: { family: 'Share Tech Mono', size: 10 },
+              boxWidth: 12,
+              padding: 12
+            }
+          },
+          tooltip: {
+            backgroundColor: '#13161b',
+            borderColor: '#1e2330',
+            borderWidth: 1,
+            titleColor: '#c8d0e0',
+            bodyColor: '#c8d0e0',
+            titleFont: { family: 'Share Tech Mono', size: 10 },
+            bodyFont: { family: 'Share Tech Mono', size: 11 },
+            callbacks: { label: ctx => ` ${ctx.dataset.label}: ${ctx.parsed.y?.toFixed(1) ?? '—'}°F` }
+          }
+        },
+        scales: {
+          x: {
+            ticks: { color: '#4a5568', font: { family: 'Share Tech Mono', size: 9 }, maxTicksLimit: 8 },
+            grid: { color: '#1e2330' },
+            border: { color: '#1e2330' }
+          },
+          y: {
+            ticks: { color: '#4a5568', font: { family: 'Share Tech Mono', size: 9 }, callback: v => v + '°F' },
+            grid: { color: '#1e2330' },
+            border: { color: '#1e2330' }
+          }
+        }
+      }
+    });
+  }
+
   async function fetchData() {
     try {
       const res = await fetch('/rooms');
@@ -533,6 +638,7 @@
 
       renderCards();
       if (selectedRoom) renderChart();
+      renderAllChart();
     } catch {
       document.getElementById('status-dot').className = 'dot offline';
       document.getElementById('status-text').textContent = 'OFFLINE';
@@ -556,6 +662,7 @@
     });
 
     renderCards();
+    renderAllChart();
     if (!selectedRoom) selectRoom(rooms[0]);
     else renderChart();
   }
