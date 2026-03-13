@@ -240,6 +240,30 @@
     margin-top: 8px;
   }
 
+  .vent-btn {
+    margin-top: 10px;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    padding: 4px 10px;
+    border-radius: 3px;
+    border: 1px solid var(--border);
+    background: transparent;
+    cursor: pointer;
+    transition: all 0.2s;
+    width: 100%;
+  }
+
+  .vent-btn.open {
+    border-color: var(--ok);
+    color: var(--ok);
+  }
+
+  .vent-btn.closed {
+    border-color: var(--muted);
+    color: var(--muted);
+  }
+
   /* No rooms placeholder */
   .no-rooms {
     grid-column: 1/-1;
@@ -394,6 +418,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
 <script>
   let roomData = {};
+  let ventData = {};
   let selectedRoom = null;
   let chart = null;
   let allChart = null;
@@ -447,12 +472,14 @@
       const color = getColor(room);
       const status = tempStatus(latest.temp);
       const selected = room === selectedRoom ? 'selected' : '';
+      const vent = ventData[room] || 'closed';
       return `
         <div class="room-card ${selected}" style="--card-color:${color}" onclick="selectRoom('${room}')">
           <div class="room-name">${room}</div>
           <div class="temp-display">${latest.temp.toFixed(1)}<span class="temp-unit">°F</span></div>
           <div class="temp-status ${status.cls}">${status.label}</div>
           <div class="last-seen">UPDATED ${timeAgo(latest.timestamp)}</div>
+          <button class="vent-btn ${vent}" onclick="toggleVent(event, '${room}')">VENT ${vent.toUpperCase()}</button>
         </div>`;
     }).join('');
   }
@@ -624,12 +651,25 @@
     });
   }
 
+  async function toggleVent(event, room) {
+    event.stopPropagation();
+    const current = ventData[room] || 'closed';
+    const next = current === 'open' ? 'closed' : 'open';
+    ventData[room] = next;
+    renderCards();
+    await fetch('/vent', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ room, state: next })
+    });
+  }
+
   async function fetchData() {
     try {
-      const res = await fetch('/rooms');
-      if (!res.ok) throw new Error();
-      const data = await res.json();
-      roomData = data;
+      const [roomsRes, ventsRes] = await Promise.all([fetch('/rooms'), fetch('/vents')]);
+      if (!roomsRes.ok) throw new Error();
+      roomData = await roomsRes.json();
+      ventData = await ventsRes.json();
 
       document.getElementById('status-dot').className = 'dot';
       document.getElementById('status-text').textContent = 'LIVE';

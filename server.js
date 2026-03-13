@@ -7,6 +7,34 @@ const path = require('path');
 const roomData = {};
 const MAX_HISTORY = 100; // keep last 100 readings per room
 
+// Vent state store: { roomName: 'open' | 'closed' }
+const ventState = {};
+
+// Persistence
+const DATA_FILE = path.join(__dirname, 'data.json');
+
+function saveData() {
+  try {
+    fs.writeFileSync(DATA_FILE, JSON.stringify({ roomData, ventState }));
+  } catch (e) {
+    console.error('Failed to save data:', e.message);
+  }
+}
+
+function loadData() {
+  try {
+    const saved = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
+    Object.assign(roomData, saved.roomData || {});
+    Object.assign(ventState, saved.ventState || {});
+    console.log('Loaded saved data from data.json');
+  } catch (e) {
+    // No saved data — starting fresh
+  }
+}
+
+loadData();
+setInterval(saveData, 10 * 60 * 1000); // Save every 10 minutes
+
 // Load config (API keys for integrations)
 let ambientConfig = null;
 let beestatConfig = null;
@@ -67,6 +95,33 @@ const server = http.createServer((req, res) => {
   if (req.method === 'GET' && req.url === '/rooms') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(roomData));
+    return;
+  }
+
+  // GET /vents — returns all vent states
+  if (req.method === 'GET' && req.url === '/vents') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(ventState));
+    return;
+  }
+
+  // POST /vent — set vent state: { room, state: 'open'|'closed' }
+  if (req.method === 'POST' && req.url === '/vent') {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', () => {
+      try {
+        const { room, state } = JSON.parse(body);
+        if (!room || !['open', 'closed'].includes(state)) throw new Error('Invalid fields');
+        ventState[room] = state;
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true }));
+        console.log(`[${new Date().toLocaleTimeString()}] Vent ${room}: ${state}`);
+      } catch (e) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: e.message }));
+      }
+    });
     return;
   }
 
