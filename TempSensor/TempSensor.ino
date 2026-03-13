@@ -8,6 +8,7 @@
 
 #define DHTPIN  4       // GPIO4 = D2 on most ESP8266 boards
 #define DHTTYPE DHT22
+#define LED_PIN 2       // Built-in LED on NodeMCU (active LOW)
 // ──────────────────────────────────────────────────────
 
 DHT dht(DHTPIN, DHTTYPE);
@@ -17,6 +18,9 @@ void setup() {
   Serial.begin(115200);
   Serial.println();
   dht.begin();
+
+  pinMode(LED_PIN, OUTPUT);
+  digitalWrite(LED_PIN, HIGH);  // OFF (active LOW)
 
   WiFi.begin(ssid, password);
   Serial.print("Connecting to WiFi");
@@ -48,6 +52,11 @@ void loop() {
 
     Serial.printf("[%s] %.1f°F -> HTTP %d\n", roomName, tempF, httpCode);
     http.end();
+
+    // Blink LED to confirm send
+    digitalWrite(LED_PIN, LOW);   // ON
+    delay(100);
+    digitalWrite(LED_PIN, HIGH);  // OFF
   } else {
     Serial.println("WiFi disconnected, reconnecting...");
     WiFi.begin(ssid, password);
