@@ -5,5 +5,8 @@
   },
   "beestat": {
     "apiKey": "YOUR_BEESTAT_API_KEY"
+  },
+  "sensors": {
+    "A0:20:A6:02:65:2A": "She Shack"
   }
 }

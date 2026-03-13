@@ -13,6 +13,7 @@
 
 DHT dht(DHTPIN, DHTTYPE);
 WiFiClient wifiClient;
+String macAddress;
 
 void setup() {
   Serial.begin(115200);
@@ -29,7 +30,9 @@ void setup() {
     Serial.print(".");
   }
   Serial.println();
+  macAddress = WiFi.macAddress();
   Serial.println("Connected! IP: " + WiFi.localIP().toString());
+  Serial.println("MAC: " + macAddress);
 }
 
 void loop() {
@@ -47,10 +50,10 @@ void loop() {
     http.begin(wifiClient, serverURL);
     http.addHeader("Content-Type", "application/json");
 
-    String payload = "{\"room\":\"" + String(roomName) + "\",\"temp\":" + String(tempF, 1) + "}";
+    String payload = "{\"mac\":\"" + macAddress + "\",\"temp\":" + String(tempF, 1) + "}";
     int httpCode = http.POST(payload);
 
-    Serial.printf("[%s] %.1f°F -> HTTP %d\n", roomName, tempF, httpCode);
+    Serial.printf("[%s] %.1f°F -> HTTP %d\n", macAddress.c_str(), tempF, httpCode);
     http.end();
 
     // Blink LED to confirm send

@@ -10,12 +10,15 @@ const MAX_HISTORY = 100; // keep last 100 readings per room
 // Load config (API keys for integrations)
 let ambientConfig = null;
 let beestatConfig = null;
+let sensorMap = {};  // MAC address -> room name
 try {
   const config = JSON.parse(fs.readFileSync(path.join(__dirname, 'server-config.json'), 'utf8'));
   ambientConfig = config.ambientWeather || null;
   beestatConfig = config.beestat || null;
+  sensorMap = config.sensors || {};
   if (ambientConfig) console.log('Ambient Weather integration enabled');
   if (beestatConfig) console.log('Beestat/Ecobee integration enabled');
+  if (Object.keys(sensorMap).length) console.log(`Sensor map loaded: ${Object.keys(sensorMap).length} device(s)`);
 } catch (e) {
   // No config file — integrations disabled
 }
@@ -41,14 +44,17 @@ const server = http.createServer((req, res) => {
     req.on('data', chunk => body += chunk);
     req.on('end', () => {
       try {
-        const { room, temp } = JSON.parse(body);
-        if (!room || temp === undefined) throw new Error('Missing fields');
-        if (!roomData[room]) roomData[room] = [];
-        roomData[room].push({ temp: parseFloat(temp), timestamp: Date.now() });
-        if (roomData[room].length > MAX_HISTORY) roomData[room].shift();
+        const { room, mac, temp } = JSON.parse(body);
+        if (temp === undefined) throw new Error('Missing fields');
+        // Resolve room name: MAC lookup → raw MAC fallback → legacy room field
+        const resolvedRoom = (mac && sensorMap[mac.toUpperCase()]) || (mac && sensorMap[mac]) || mac || room;
+        if (!resolvedRoom) throw new Error('Missing room or mac');
+        if (!roomData[resolvedRoom]) roomData[resolvedRoom] = [];
+        roomData[resolvedRoom].push({ temp: parseFloat(temp), timestamp: Date.now() });
+        if (roomData[resolvedRoom].length > MAX_HISTORY) roomData[resolvedRoom].shift();
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ok: true }));
-        console.log(`[${new Date().toLocaleTimeString()}] ${room}: ${temp}°F`);
+        console.log(`[${new Date().toLocaleTimeString()}] ${resolvedRoom}: ${temp}°F`);
       } catch (e) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: e.message }));
