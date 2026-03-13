@@ -7,6 +7,9 @@
     "apiKey": "YOUR_BEESTAT_API_KEY"
   },
   "sensors": {
-    "A0:20:A6:02:65:2A": "She Shack"
+    "A0:20:A6:02:65:2A": "She Shack",
+    "5C:CF:7F:11:62:D7": "Jenny Bedroom",
+    "18:FE:34:F4:B8:DA": "Hot Rod Garage",
+    "5C:CF:7F:A3:C9:2E": "Basement Storage"
   }
 }
