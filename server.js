@@ -32,7 +32,6 @@ function loadData() {
   }
 }
 
-loadData();
 setInterval(saveData, 10 * 60 * 1000); // Save every 10 minutes
 
 // Load config (API keys for integrations)
