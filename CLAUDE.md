@@ -11,6 +11,31 @@ node server.js --demo   # Demo mode — generates fake room data automatically
 
 Open **http://localhost:3000** after starting. No `npm install` needed — zero dependencies, pure Node.js built-ins only.
 
+## Server Process Management (pm2)
+
+pm2 keeps the server running and auto-starts it on system boot.
+
+**One-time setup on the server:**
+```bash
+npm install -g pm2
+cd /path/to/HomeTempDashboard
+pm2 start server.js --name homedash
+pm2 startup          # follow the printed command to enable auto-start on boot
+pm2 save             # save process list so it survives reboots
+```
+
+**After pulling a code update:**
+```bash
+git pull && pm2 restart homedash
+```
+
+**Other useful commands:**
+```bash
+pm2 logs homedash    # live console output
+pm2 status           # check if running
+pm2 stop homedash    # stop the server
+```
+
 ## Architecture
 
 This is a two-component IoT dashboard:
