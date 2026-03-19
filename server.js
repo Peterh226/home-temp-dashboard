@@ -13,9 +13,11 @@ const ventState = {};
 // Persistence
 const DATA_FILE = path.join(__dirname, 'data.json');
 
+const HISTORY_WINDOW = 4 * 60 * 60 * 1000; // 4 hours in ms
+
 function saveData() {
   try {
-    fs.writeFileSync(DATA_FILE, JSON.stringify({ roomData, ventState }));
+    fs.writeFileSync(DATA_FILE, JSON.stringify({ roomData, ventState, hvacLog }));
   } catch (e) {
     console.error('Failed to save data:', e.message);
   }
@@ -24,9 +26,21 @@ function saveData() {
 function loadData() {
   try {
     const saved = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
-    Object.assign(roomData, saved.roomData || {});
+    const cutoff = Date.now() - HISTORY_WINDOW;
+
+    // Restore room data, filtered to last 4 hours
+    for (const room of Object.keys(saved.roomData || {})) {
+      const filtered = saved.roomData[room].filter(r => r.timestamp >= cutoff);
+      if (filtered.length > 0) roomData[room] = filtered;
+    }
+
+    // Restore vent state
     Object.assign(ventState, saved.ventState || {});
-    console.log('Loaded saved data from data.json');
+
+    // Restore hvac log, filtered to last 4 hours
+    hvacLog = (saved.hvacLog || []).filter(e => e.timestamp >= cutoff);
+
+    console.log(`Loaded saved data: ${Object.keys(roomData).length} room(s), ${hvacLog.length} HVAC entries`);
   } catch (e) {
     // No saved data — starting fresh
   }
@@ -53,6 +67,9 @@ try {
 // Ecobee data (separate from room temps — includes setpoint and program)
 let ecobeeData = null;
 
+// HVAC status log: [{ status: 'heat'|'cool'|'fan'|'off', timestamp }]
+let hvacLog = [];
+
 const server = http.createServer((req, res) => {
   // CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -65,23 +82,31 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // POST /data  — ESP sends: { "room": "Living Room", "temp": 72.5 }
+  // POST /data  — ESP sends: { "mac": "AA:BB:CC:DD:EE:FF", "temp": 72.5 }
   if (req.method === 'POST' && req.url === '/data') {
     let body = '';
-    req.on('data', chunk => body += chunk);
+    req.on('data', chunk => {
+      body += chunk;
+      if (body.length > 1024) { res.writeHead(413); res.end(); body = null; }
+    });
     req.on('end', () => {
+      if (body === null) return;
       try {
         const { room, mac, temp } = JSON.parse(body);
         if (temp === undefined) throw new Error('Missing fields');
+        const tempNum = parseFloat(temp);
+        if (isNaN(tempNum) || tempNum < -40 || tempNum > 200) throw new Error('Invalid temp');
         // Resolve room name: MAC lookup → raw MAC fallback → legacy room field
         const resolvedRoom = (mac && sensorMap[mac.toUpperCase()]) || (mac && sensorMap[mac]) || mac || room;
         if (!resolvedRoom) throw new Error('Missing room or mac');
+        if (resolvedRoom.length > 64) throw new Error('Room name too long');
+        if (Object.keys(roomData).length >= 50 && !roomData[resolvedRoom]) throw new Error('Too many rooms');
         if (!roomData[resolvedRoom]) roomData[resolvedRoom] = [];
-        roomData[resolvedRoom].push({ temp: parseFloat(temp), timestamp: Date.now() });
+        roomData[resolvedRoom].push({ temp: tempNum, timestamp: Date.now() });
         if (roomData[resolvedRoom].length > MAX_HISTORY) roomData[resolvedRoom].shift();
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ok: true, room: resolvedRoom }));
-        console.log(`[${new Date().toLocaleTimeString()}] ${resolvedRoom}: ${temp}°F`);
+        console.log(`[${new Date().toLocaleTimeString()}] ${resolvedRoom}: ${tempNum}°F`);
       } catch (e) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: e.message }));
@@ -107,8 +132,12 @@ const server = http.createServer((req, res) => {
   // POST /vent — set vent state: { room, state: 'open'|'closed' }
   if (req.method === 'POST' && req.url === '/vent') {
     let body = '';
-    req.on('data', chunk => body += chunk);
+    req.on('data', chunk => {
+      body += chunk;
+      if (body.length > 256) { res.writeHead(413); res.end(); body = null; }
+    });
     req.on('end', () => {
+      if (body === null) return;
       try {
         const { room, state } = JSON.parse(body);
         if (!room || !['open', 'closed'].includes(state)) throw new Error('Invalid fields');
@@ -121,6 +150,13 @@ const server = http.createServer((req, res) => {
         res.end(JSON.stringify({ error: e.message }));
       }
     });
+    return;
+  }
+
+  // GET /hvac — returns HVAC status log
+  if (req.method === 'GET' && req.url === '/hvac') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(hvacLog));
     return;
   }
 
@@ -254,10 +290,19 @@ async function fetchBeestat() {
 
     const now = Date.now();
 
-    // Process thermostat data (setpoint, program)
+    // Process thermostat data (setpoint, program, equipment status)
     const tId = Object.keys(thermostats)[0];
     if (tId) {
       const t = thermostats[tId];
+
+      // Determine HVAC status from equipment_status string
+      // e.g. "heatPump,fan", "compCool1", "auxHeat1", or "" (off)
+      const equip = (t.equipment_status || '').toLowerCase();
+      let hvacStatus = 'off';
+      if (/heat|aux/.test(equip)) hvacStatus = 'heat';
+      else if (/cool|comp/.test(equip)) hvacStatus = 'cool';
+      else if (/fan/.test(equip)) hvacStatus = 'fan';
+
       ecobeeData = {
         name: t.name,
         temperature: t.temperature,
@@ -265,9 +310,16 @@ async function fetchBeestat() {
         setpoint_heat: t.setpoint_heat,
         setpoint_cool: t.setpoint_cool,
         program: t.program?.currentClimateRef || null,
+        hvac_status: hvacStatus,
         timestamp: now
       };
-      console.log(`[${new Date().toLocaleTimeString()}] Ecobee: ${t.temperature}°F, setpoint heat:${t.setpoint_heat} cool:${t.setpoint_cool}, program:${ecobeeData.program}`);
+
+      // Append to hvac log, trim to 4-hour window
+      hvacLog.push({ status: hvacStatus, timestamp: now });
+      const cutoff = Date.now() - HISTORY_WINDOW;
+      hvacLog = hvacLog.filter(e => e.timestamp >= cutoff);
+
+      console.log(`[${new Date().toLocaleTimeString()}] Ecobee: ${t.temperature}°F, heat:${t.setpoint_heat} cool:${t.setpoint_cool}, program:${ecobeeData.program}, hvac:${hvacStatus} [${t.equipment_status || 'none'}]`);
     }
 
     // Process sensor data — add each as a room
@@ -286,6 +338,7 @@ async function fetchBeestat() {
 }
 
 const PORT = 3000;
+loadData();
 server.listen(PORT, () => {
   console.log(`\n  Temperature Dashboard running at http://localhost:${PORT}`);
   console.log(`  ESP32/ESP8266 POST endpoint: http://YOUR_PC_IP:${PORT}/data`);

@@ -15,7 +15,7 @@
     --warm: #ff9f43;
     --cool: #48dbfb;
     --text: #c8d0e0;
-    --muted: #4a5568;
+    --muted: #8a96aa;
     --hot: #ff4757;
     --cold: #48dbfb;
     --ok: #2ed573;
@@ -105,7 +105,7 @@
     align-items: center;
     gap: 8px;
     font-family: 'Share Tech Mono', monospace;
-    font-size: 11px;
+    font-size: 13px;
     color: var(--muted);
   }
 
@@ -127,7 +127,7 @@
 
   #last-update {
     font-family: 'Share Tech Mono', monospace;
-    font-size: 11px;
+    font-size: 13px;
     color: var(--muted);
   }
 
@@ -139,7 +139,7 @@
 
   .section-label {
     font-family: 'Share Tech Mono', monospace;
-    font-size: 10px;
+    font-size: 12px;
     letter-spacing: 0.2em;
     text-transform: uppercase;
     color: var(--muted);
@@ -195,7 +195,7 @@
   }
 
   .room-card .room-name {
-    font-size: 11px;
+    font-size: 13px;
     font-weight: 600;
     letter-spacing: 0.1em;
     text-transform: uppercase;
@@ -218,7 +218,7 @@
   }
 
   .room-card .temp-status {
-    font-size: 11px;
+    font-size: 13px;
     font-weight: 600;
     letter-spacing: 0.08em;
     text-transform: uppercase;
@@ -235,7 +235,7 @@
 
   .room-card .last-seen {
     font-family: 'Share Tech Mono', monospace;
-    font-size: 9px;
+    font-size: 11px;
     color: var(--muted);
     margin-top: 8px;
   }
@@ -243,7 +243,7 @@
   .vent-btn {
     margin-top: 10px;
     font-family: 'Share Tech Mono', monospace;
-    font-size: 10px;
+    font-size: 12px;
     letter-spacing: 0.08em;
     padding: 4px 10px;
     border-radius: 3px;
@@ -309,7 +309,7 @@
 
   #chart-subtitle, #all-chart-subtitle {
     font-family: 'Share Tech Mono', monospace;
-    font-size: 10px;
+    font-size: 12px;
     color: var(--muted);
     margin-top: 2px;
   }
@@ -327,7 +327,7 @@
   /* Demo button */
   .demo-btn {
     font-family: 'Share Tech Mono', monospace;
-    font-size: 11px;
+    font-size: 13px;
     letter-spacing: 0.08em;
     background: transparent;
     border: 1px solid var(--border);
@@ -419,9 +419,51 @@
 <script>
   let roomData = {};
   let ventData = {};
+  let hvacData = [];
   let selectedRoom = null;
   let chart = null;
   let allChart = null;
+
+  function esc(str) {
+    return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+  }
+
+  // Returns an array of hvac statuses aligned to a readings array by timestamp
+  function getHvacStatuses(readings) {
+    return readings.map(r => {
+      let status = null;
+      for (const e of hvacData) {
+        if (e.timestamp <= r.timestamp) status = e.status;
+        else break;
+      }
+      return status;
+    });
+  }
+
+  // Chart.js plugin: colored background bands per HVAC status
+  const hvacBgPlugin = {
+    id: 'hvacBg',
+    beforeDraw(chart) {
+      const statuses = chart.config.options.plugins.hvacBg?.statuses;
+      if (!statuses || statuses.length === 0 || !chart.chartArea) return;
+      const { ctx, chartArea: { top, bottom }, scales: { x } } = chart;
+      ctx.save();
+      statuses.forEach((status, i) => {
+        if (!status || status === 'off' || status === 'fan') return;
+        const color = status === 'heat'
+          ? 'rgba(255, 120, 50, 0.10)'
+          : 'rgba(50, 160, 255, 0.10)';
+        const x0 = i === 0 ? chart.chartArea.left
+          : (x.getPixelForValue(i - 1) + x.getPixelForValue(i)) / 2;
+        const x1 = i === statuses.length - 1 ? chart.chartArea.right
+          : (x.getPixelForValue(i) + x.getPixelForValue(i + 1)) / 2;
+        ctx.fillStyle = color;
+        ctx.fillRect(x0, top, x1 - x0, bottom - top);
+      });
+      ctx.restore();
+    }
+  };
+  Chart.register(hvacBgPlugin);
 
   const ROOM_COLORS = [
     '#00e5ff','#ff6b35','#ff9f43','#a29bfe',
@@ -473,13 +515,14 @@
       const status = tempStatus(latest.temp);
       const selected = room === selectedRoom ? 'selected' : '';
       const vent = ventData[room] || 'closed';
+      const r = esc(room);
       return `
-        <div class="room-card ${selected}" style="--card-color:${color}" onclick="selectRoom('${room}')">
-          <div class="room-name">${room}</div>
+        <div class="room-card ${selected}" style="--card-color:${color}" onclick="selectRoom(${JSON.stringify(room)})">
+          <div class="room-name">${r}</div>
           <div class="temp-display">${latest.temp.toFixed(1)}<span class="temp-unit">°F</span></div>
           <div class="temp-status ${status.cls}">${status.label}</div>
           <div class="last-seen">UPDATED ${timeAgo(latest.timestamp)}</div>
-          <button class="vent-btn ${vent}" onclick="toggleVent(event, '${room}')">VENT ${vent.toUpperCase()}</button>
+          <button class="vent-btn ${vent}" onclick="toggleVent(event, ${JSON.stringify(room)})">VENT ${vent.toUpperCase()}</button>
         </div>`;
     }).join('');
   }
@@ -511,6 +554,8 @@
     const data = readings.map(r => r.temp);
     const color = getColor(selectedRoom);
 
+    const hvacStatuses = getHvacStatuses(readings);
+
     document.getElementById('chart-title').textContent = selectedRoom.toUpperCase();
     document.getElementById('chart-subtitle').textContent = `${readings.length} readings · Last: ${data[data.length-1].toFixed(1)}°F`;
 
@@ -535,7 +580,10 @@
         responsive: true,
         maintainAspectRatio: false,
         animation: { duration: 300 },
-        plugins: { legend: { display: false }, tooltip: {
+        plugins: {
+          hvacBg: { statuses: hvacStatuses },
+          legend: { display: false },
+          tooltip: {
           backgroundColor: '#13161b',
           borderColor: '#1e2330',
           borderWidth: 1,
@@ -543,16 +591,20 @@
           bodyColor: color,
           titleFont: { family: 'Share Tech Mono', size: 10 },
           bodyFont: { family: 'Share Tech Mono', size: 13 },
-          callbacks: { label: ctx => ` ${ctx.parsed.y.toFixed(1)}°F` }
+          callbacks: { label: ctx => {
+            const s = hvacStatuses[ctx.dataIndex];
+            const hvac = s && s !== 'off' ? `  [${s.toUpperCase()}]` : '';
+            return ` ${ctx.parsed.y.toFixed(1)}°F${hvac}`;
+          }}
         }},
         scales: {
           x: {
-            ticks: { color: '#4a5568', font: { family: 'Share Tech Mono', size: 9 }, maxTicksLimit: 8 },
+            ticks: { color: '#8a96aa', font: { family: 'Share Tech Mono', size: 11 }, maxTicksLimit: 8 },
             grid: { color: '#1e2330' },
             border: { color: '#1e2330' }
           },
           y: {
-            ticks: { color: '#4a5568', font: { family: 'Share Tech Mono', size: 9 }, callback: v => v + '°F' },
+            ticks: { color: '#8a96aa', font: { family: 'Share Tech Mono', size: 11 }, callback: v => v + '°F' },
             grid: { color: '#1e2330' },
             border: { color: '#1e2330' }
           }
@@ -604,6 +656,8 @@
     document.getElementById('all-chart-subtitle').textContent =
       `${rooms.length} sources · Updated ${new Date().toLocaleTimeString()}`;
 
+    const allHvacStatuses = getHvacStatuses(roomData[maxRoom]);
+
     if (allChart) allChart.destroy();
 
     allChart = new Chart(canvas.getContext('2d'), {
@@ -614,12 +668,13 @@
         maintainAspectRatio: false,
         animation: { duration: 300 },
         plugins: {
+          hvacBg: { statuses: allHvacStatuses },
           legend: {
             display: true,
             position: 'top',
             labels: {
-              color: '#4a5568',
-              font: { family: 'Share Tech Mono', size: 10 },
+              color: '#8a96aa',
+              font: { family: 'Share Tech Mono', size: 12 },
               boxWidth: 12,
               padding: 12
             }
@@ -637,12 +692,12 @@
         },
         scales: {
           x: {
-            ticks: { color: '#4a5568', font: { family: 'Share Tech Mono', size: 9 }, maxTicksLimit: 8 },
+            ticks: { color: '#8a96aa', font: { family: 'Share Tech Mono', size: 11 }, maxTicksLimit: 8 },
             grid: { color: '#1e2330' },
             border: { color: '#1e2330' }
           },
           y: {
-            ticks: { color: '#4a5568', font: { family: 'Share Tech Mono', size: 9 }, callback: v => v + '°F' },
+            ticks: { color: '#8a96aa', font: { family: 'Share Tech Mono', size: 11 }, callback: v => v + '°F' },
             grid: { color: '#1e2330' },
             border: { color: '#1e2330' }
           }
@@ -666,10 +721,11 @@
 
   async function fetchData() {
     try {
-      const [roomsRes, ventsRes] = await Promise.all([fetch('/rooms'), fetch('/vents')]);
+      const [roomsRes, ventsRes, hvacRes] = await Promise.all([fetch('/rooms'), fetch('/vents'), fetch('/hvac')]);
       if (!roomsRes.ok) throw new Error();
       roomData = await roomsRes.json();
       ventData = await ventsRes.json();
+      hvacData = await hvacRes.json();
 
       document.getElementById('status-dot').className = 'dot';
       document.getElementById('status-text').textContent = 'LIVE';
