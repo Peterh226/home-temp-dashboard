@@ -297,6 +297,9 @@ async function fetchBeestat() {
     if (tId) {
       const t = thermostats[tId];
 
+      // Debug: log all thermostat keys once to find equipment status field
+      console.log('[Beestat thermostat fields]', Object.keys(t).join(', '));
+
       // Determine HVAC status from equipment_status string
       // e.g. "heatPump,fan", "compCool1", "auxHeat1", or "" (off)
       const equip = (t.equipment_status || '').toLowerCase();
