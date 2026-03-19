@@ -28,10 +28,10 @@ function loadData() {
     const saved = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
     const cutoff = Date.now() - HISTORY_WINDOW;
 
-    // Restore room data, filtered to last 4 hours
+    // Restore room data, trimmed to last 4 hours then capped at MAX_HISTORY
     for (const room of Object.keys(saved.roomData || {})) {
       const filtered = saved.roomData[room].filter(r => r.timestamp >= cutoff);
-      if (filtered.length > 0) roomData[room] = filtered;
+      if (filtered.length > 0) roomData[room] = filtered.slice(-MAX_HISTORY);
     }
 
     // Restore vent state
@@ -40,7 +40,9 @@ function loadData() {
     // Restore hvac log, filtered to last 4 hours
     hvacLog = (saved.hvacLog || []).filter(e => e.timestamp >= cutoff);
 
-    console.log(`Loaded saved data: ${Object.keys(roomData).length} room(s), ${hvacLog.length} HVAC entries`);
+    const roomCount = Object.keys(roomData).length;
+    const totalReadings = Object.values(roomData).reduce((s, r) => s + r.length, 0);
+    console.log(`Loaded saved data: ${roomCount} room(s), ${totalReadings} readings, ${hvacLog.length} HVAC entries (cutoff: last 4h)`);
   } catch (e) {
     // No saved data — starting fresh
   }

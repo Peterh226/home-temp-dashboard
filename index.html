@@ -517,12 +517,12 @@
       const vent = ventData[room] || 'closed';
       const r = esc(room);
       return `
-        <div class="room-card ${selected}" style="--card-color:${color}" onclick="selectRoom(${JSON.stringify(room)})">
+        <div class="room-card ${selected}" style="--card-color:${color}" onclick="selectRoom(${esc(JSON.stringify(room))})">
           <div class="room-name">${r}</div>
           <div class="temp-display">${latest.temp.toFixed(1)}<span class="temp-unit">°F</span></div>
           <div class="temp-status ${status.cls}">${status.label}</div>
           <div class="last-seen">UPDATED ${timeAgo(latest.timestamp)}</div>
-          <button class="vent-btn ${vent}" onclick="toggleVent(event, ${JSON.stringify(room)})">VENT ${vent.toUpperCase()}</button>
+          <button class="vent-btn ${vent}" onclick="toggleVent(event, ${esc(JSON.stringify(room))})">VENT ${vent.toUpperCase()}</button>
         </div>`;
     }).join('');
   }
