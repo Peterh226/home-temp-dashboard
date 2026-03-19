@@ -297,12 +297,9 @@ async function fetchBeestat() {
     if (tId) {
       const t = thermostats[tId];
 
-      // Debug: log all thermostat keys once to find equipment status field
-      console.log('[Beestat thermostat fields]', Object.keys(t).join(', '));
-
-      // Determine HVAC status from equipment_status string
+      // Determine HVAC status from running_equipment string
       // e.g. "heatPump,fan", "compCool1", "auxHeat1", or "" (off)
-      const equip = (t.equipment_status || '').toLowerCase();
+      const equip = (t.running_equipment || '').toLowerCase();
       let hvacStatus = 'off';
       if (/heat|aux/.test(equip)) hvacStatus = 'heat';
       else if (/cool|comp/.test(equip)) hvacStatus = 'cool';
@@ -324,7 +321,7 @@ async function fetchBeestat() {
       const cutoff = Date.now() - HISTORY_WINDOW;
       hvacLog = hvacLog.filter(e => e.timestamp >= cutoff);
 
-      console.log(`[${new Date().toLocaleTimeString()}] Ecobee: ${t.temperature}°F, heat:${t.setpoint_heat} cool:${t.setpoint_cool}, program:${ecobeeData.program}, hvac:${hvacStatus} [${t.equipment_status || 'none'}]`);
+      console.log(`[${new Date().toLocaleTimeString()}] Ecobee: ${t.temperature}°F, heat:${t.setpoint_heat} cool:${t.setpoint_cool}, program:${ecobeeData.program}, hvac:${hvacStatus} [${t.running_equipment || 'none'}]`);
     }
 
     // Process sensor data — add each as a room
