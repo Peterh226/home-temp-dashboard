@@ -80,7 +80,7 @@ const server = http.createServer((req, res) => {
         roomData[resolvedRoom].push({ temp: parseFloat(temp), timestamp: Date.now() });
         if (roomData[resolvedRoom].length > MAX_HISTORY) roomData[resolvedRoom].shift();
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ ok: true }));
+        res.end(JSON.stringify({ ok: true, room: resolvedRoom }));
         console.log(`[${new Date().toLocaleTimeString()}] ${resolvedRoom}: ${temp}°F`);
       } catch (e) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -292,15 +292,15 @@ server.listen(PORT, () => {
   console.log(`    Payload format: { "room": "Living Room", "temp": 72.5 }\n`);
   if (process.argv.includes('--demo')) startDemo();
 
-  // Start Ambient Weather polling (every 60s)
+  // Start Ambient Weather polling (every 5 min)
   if (ambientConfig) {
     fetchAmbientWeather();
-    setInterval(fetchAmbientWeather, 60000);
+    setInterval(fetchAmbientWeather, 300000);
   }
 
-  // Start Beestat/Ecobee polling (every 3 min — ecobee data updates every 3 min)
+  // Start Beestat/Ecobee polling (every 5 min)
   if (beestatConfig) {
     fetchBeestat();
-    setInterval(fetchBeestat, 180000);
+    setInterval(fetchBeestat, 300000);
   }
 });
