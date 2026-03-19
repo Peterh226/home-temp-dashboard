@@ -297,9 +297,9 @@ async function fetchBeestat() {
     if (tId) {
       const t = thermostats[tId];
 
-      // Determine HVAC status from running_equipment string
-      // e.g. "heatPump,fan", "compCool1", "auxHeat1", or "" (off)
-      const equip = (t.running_equipment || '').toLowerCase();
+      // Determine HVAC status from running_equipment (string or array)
+      const re = t.running_equipment;
+      const equip = (Array.isArray(re) ? re.join(',') : (re || '')).toLowerCase();
       let hvacStatus = 'off';
       if (/heat|aux/.test(equip)) hvacStatus = 'heat';
       else if (/cool|comp/.test(equip)) hvacStatus = 'cool';
