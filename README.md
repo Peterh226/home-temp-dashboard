@@ -1,207 +1,98 @@
-# 🌡️ Home Temperature Dashboard
+# Home Temperature Dashboard
 
-A lightweight, self-hosted dashboard for monitoring temperatures across multiple rooms in your home using ESP32 or ESP8266 sensors.
+A lightweight, self-hosted dashboard for monitoring temperatures across multiple rooms using ESP8266 sensors and a Raspberry Pi server.
 
 No cloud. No subscription. Runs entirely on your local network.
-
-![Dashboard](https://img.shields.io/badge/status-working-brightgreen) ![Node](https://img.shields.io/badge/node-no_dependencies-blue) ![Hardware](https://img.shields.io/badge/hardware-ESP32%20%2F%20ESP8266-orange)
 
 ---
 
 ## Features
 
 - Live temperature readings per room, auto-refreshing every 10 seconds
-- Temperature history charts — click any room card to view its trend
 - Color-coded status: COOL / GOOD / WARM / HOT
-- Supports unlimited rooms (one ESP per room)
-- No npm installs, no database — pure Node.js, runs out of the box
-- Built-in Arduino code snippet shown right in the dashboard
+- Click any room card to view its temperature history chart
+- All-rooms comparison chart with shared timeline
+- HVAC status overlay — heat/cool cycles shown as colored bands on charts
+- Vent open/closed toggle per room
+- Offline indicator on room cards (greys out after 15 min without a reading)
+- Ecobee thermostat integration via Beestat API
+- Ambient Weather outdoor sensor integration
+- Last 4 hours of data restored automatically on server restart
+- No npm installs, no database — pure Node.js
+
+---
+
+## Hardware
+
+- **Server:** Raspberry Pi (any model with WiFi or Ethernet)
+- **Sensors:** NodeMCU ESP8266 with DHT22 temperature sensor
+- Each NodeMCU uses deep sleep between readings — requires a jumper wire from D0 (GPIO16) to RST
+- Sensors report every 5 minutes via HTTP POST
+- Room names are assigned server-side by MAC address — all units run identical firmware
 
 ---
 
 ## How It Works
 
-```
-[ESP32/ESP8266] ──HTTP POST──► [Node.js Server :3000] ──► [Browser Dashboard]
-   (each room)                    (stores in memory)          (polls every 10s)
-```
-
-Each microcontroller reads its temperature sensor and POSTs a small JSON payload to your PC. The server stores readings in memory and serves the dashboard. The browser polls for updates automatically.
+Each NodeMCU wakes from deep sleep, connects to WiFi, reads the DHT22, POSTs its MAC address and temperature to the server, blinks the LED, then sleeps for 5 minutes. The server looks up the room name from the MAC address in `server-config.json` and stores the reading in memory.
 
 ---
 
-## Getting Started
+## Server Setup
 
-### 1. Run the Server
+Requires Node.js. No dependencies to install.
 
-No dependencies to install — just Node.js.
+Clone the repo, copy `server-config.json.example` to `server-config.json` and fill in your API keys and sensor MAC-to-room mappings, then start the server.
 
-```bash
-git clone https://github.com/YOUR_USERNAME/home-temp-dashboard.git
-cd home-temp-dashboard
-node server.js
-```
-
-Then open **http://localhost:3000** in your browser.
-
-You'll see your local IP printed in the terminal — you'll need that for the ESP code.
+Open `http://<server-ip>:3000` in any browser on your network.
 
 ---
 
-### 2. Wire Up Your Sensor
+## Process Management (pm2)
 
-Common sensor options:
+pm2 keeps the server running and restarts it on system boot.
 
-| Sensor | Interface | Accuracy | Notes |
-|--------|-----------|----------|-------|
-| DHT22  | Digital   | ±0.5°C   | Best for most rooms |
-| DS18B20 | 1-Wire   | ±0.5°C   | Waterproof version available |
-| DHT11  | Digital   | ±2°C     | Budget option |
-| SHT31  | I2C       | ±0.3°C   | High accuracy |
+One-time setup: `sudo npm install -g pm2`, then `pm2 start server.js --name homedash`, then `pm2 startup` (follow the printed command), then `pm2 save`.
 
----
+Common commands:
+- `pm2 restart homedash` — restart after a code update
+- `pm2 logs homedash` — view live console output
+- `pm2 status` — check if running
+- `pm2 stop homedash` — stop the server
 
-### 3. Flash Your ESP32 / ESP8266
-
-Install these libraries in Arduino IDE first:
-- `DHT sensor library` by Adafruit (if using DHT22/DHT11)
-- `WiFi.h` — built into ESP32 core
-- `HTTPClient.h` — built into ESP32 core
-
-```cpp
-#include <WiFi.h>          // Use <ESP8266WiFi.h> for ESP8266
-#include <HTTPClient.h>
-#include <DHT.h>
-
-// ── Config ────────────────────────────────────────────
-const char* ssid      = "YOUR_WIFI_SSID";
-const char* password  = "YOUR_WIFI_PASSWORD";
-const char* serverURL = "http://YOUR_PC_IP:3000/data";  // e.g. http://192.168.1.42:3000/data
-const char* roomName  = "Living Room";                   // Change this per device
-
-#define DHTPIN  4       // GPIO pin connected to DHT22 data line
-#define DHTTYPE DHT22
-// ──────────────────────────────────────────────────────
-
-DHT dht(DHTPIN, DHTTYPE);
-
-void setup() {
-  Serial.begin(115200);
-  dht.begin();
-
-  WiFi.begin(ssid, password);
-  Serial.print("Connecting to WiFi");
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-  }
-  Serial.println("\nConnected! IP: " + WiFi.localIP().toString());
-}
-
-void loop() {
-  delay(2000); // DHT22 needs 2s between reads
-
-  float tempC = dht.readTemperature();
-  float tempF = dht.readTemperature(true); // pass true for Fahrenheit
-
-  if (isnan(tempF)) {
-    Serial.println("Failed to read from DHT sensor!");
-    return;
-  }
-
-  if (WiFi.status() == WL_CONNECTED) {
-    HTTPClient http;
-    http.begin(serverURL);
-    http.addHeader("Content-Type", "application/json");
-
-    String payload = "{\"room\":\"" + String(roomName) + "\",\"temp\":" + String(tempF, 1) + "}";
-    int httpCode = http.POST(payload);
-
-    Serial.printf("[%s] %.1f°F → HTTP %d\n", roomName, tempF, httpCode);
-    http.end();
-  }
-
-  delay(28000); // Wait ~30s total between sends
-}
-```
-
-**For ESP8266**, replace:
-```cpp
-#include <WiFi.h>     →  #include <ESP8266WiFi.h>
-#include <HTTPClient.h>  →  #include <ESP8266HTTPClient.h>
-```
+After pulling a code update: `git pull && pm2 restart homedash`
 
 ---
 
-## API Reference
+## Configuration
 
-The server exposes two endpoints:
+All settings live in `server-config.json` (gitignored — copy from `server-config.json.example`):
 
-### `POST /data`
-Send a temperature reading from your ESP.
-
-**Body:**
-```json
-{
-  "room": "Living Room",
-  "temp": 72.5
-}
-```
-
-**Response:**
-```json
-{ "ok": true }
-```
+- `ambientWeather` — API key and application key for Ambient Weather integration
+- `beestat` — API key for Beestat/Ecobee integration
+- `sensors` — MAC address to room name mappings for each NodeMCU
 
 ---
 
-### `GET /rooms`
-Returns all stored room data.
+## Flashing Sensors
 
-**Response:**
-```json
-{
-  "Living Room": [
-    { "temp": 72.5, "timestamp": 1710000000000 },
-    { "temp": 72.8, "timestamp": 1710000030000 }
-  ],
-  "Bedroom": [...]
-}
-```
+Arduino sketch is in `TempSensor/`. Credentials go in `TempSensor/config.h` (gitignored — copy from `config.h.example`).
+
+Flash using `arduino-cli` with FQBN `esp8266:esp8266:nodemcuv2`. The MAC address is printed during upload and on WiFi connect via serial. Add new MACs to `server-config.json` on the server.
 
 ---
 
-## Project Structure
+## API
 
-```
-home-temp-dashboard/
-├── server.js      # Node.js backend — receives sensor data, serves dashboard
-├── index.html     # Dashboard UI — charts, room cards, live updates
-└── README.md
-```
-
----
-
-## Tips
-
-- **Multiple rooms**: Flash a separate ESP for each room, changing only the `roomName` constant
-- **Keep PC awake**: The server needs to stay running; consider running it on a Raspberry Pi or an old laptop for 24/7 uptime
-- **Finding your PC's IP**: On Windows run `ipconfig`, on Mac/Linux run `ifconfig` or `ip addr`
-- **Firewall**: Make sure port 3000 is allowed through your local firewall so ESPs can reach the server
-- **History limit**: The server keeps the last 100 readings per room in memory. Restarting the server clears history (no persistence yet)
-
----
-
-## Roadmap / Ideas
-
-- [ ] Persist history to a JSON file or SQLite
-- [ ] Add humidity support (DHT22 already provides it)
-- [ ] Email / push alerts when temperature goes out of range
-- [ ] Raspberry Pi setup guide
-- [ ] Dark/light mode toggle
+- `POST /data` — receive a sensor reading (`{ mac, temp }`)
+- `GET /rooms` — all room temperature history
+- `GET /vents` — vent states
+- `POST /vent` — set vent state (`{ room, state: 'open'|'closed' }`)
+- `GET /ecobee` — thermostat setpoint and program
+- `GET /hvac` — HVAC status log (heat/cool/fan/off with timestamps)
 
 ---
 
 ## License
 
-MIT — do whatever you want with it.
+MIT
