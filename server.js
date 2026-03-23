@@ -280,9 +280,9 @@ function beestatRequest(resource, method) {
 async function fetchBeestat() {
   if (!beestatConfig) return;
   try {
-    // Sync first to get fresh data
-    await beestatRequest('thermostat', 'sync');
-    await beestatRequest('sensor', 'sync');
+    // Sync first to get fresh data (non-fatal if unavailable)
+    await beestatRequest('thermostat', 'sync').catch(e => console.warn('Beestat sync warning:', e.message));
+    await beestatRequest('sensor', 'sync').catch(e => {});
 
     // Small delay to let sync complete
     await new Promise(r => setTimeout(r, 1000));
