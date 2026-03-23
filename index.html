@@ -233,6 +233,20 @@
   .status-ok { background: rgba(46,213,115,0.15); color: var(--ok); }
   .status-cool { background: rgba(72,219,251,0.15); color: var(--cool); }
 
+  .room-card.offline { opacity: 0.5; }
+  .room-card.offline::before { background: var(--muted); }
+  .offline-badge {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    background: rgba(255,71,87,0.15);
+    color: var(--hot);
+    padding: 2px 8px;
+    border-radius: 3px;
+    margin-top: 6px;
+    display: inline-block;
+  }
+
   .room-card .last-seen {
     font-family: 'Share Tech Mono', monospace;
     font-size: 11px;
@@ -516,15 +530,26 @@
       const selected = room === selectedRoom ? 'selected' : '';
       const vent = ventData[room] || 'closed';
       const r = esc(room);
+      const offline = (Date.now() - latest.timestamp) > 15 * 60 * 1000;
       return `
-        <div class="room-card ${selected}" style="--card-color:${color}" onclick="selectRoom(${esc(JSON.stringify(room))})">
+        <div class="room-card ${selected} ${offline ? 'offline' : ''}" style="--card-color:${color}" onclick="selectRoom(${esc(JSON.stringify(room))})">
           <div class="room-name">${r}</div>
           <div class="temp-display">${latest.temp.toFixed(1)}<span class="temp-unit">°F</span></div>
           <div class="temp-status ${status.cls}">${status.label}</div>
+          ${offline ? '<div class="offline-badge">OFFLINE</div>' : ''}
           <div class="last-seen">UPDATED ${timeAgo(latest.timestamp)}</div>
           <button class="vent-btn ${vent}" onclick="toggleVent(event, ${esc(JSON.stringify(room))})">VENT ${vent.toUpperCase()}</button>
         </div>`;
     }).join('');
+  }
+
+  // Returns the readings of the room with the most data points — used as the common x-axis
+  function getCommonTimeline() {
+    const rooms = Object.keys(roomData);
+    if (rooms.length === 0) return [];
+    let maxRoom = rooms[0];
+    rooms.forEach(r => { if (roomData[r].length > roomData[maxRoom].length) maxRoom = r; });
+    return roomData[maxRoom];
   }
 
   function selectRoom(room) {
@@ -546,18 +571,20 @@
     canvas.style.display = 'block';
     empty.style.display = 'none';
 
+    const timeline = getCommonTimeline();
     const readings = roomData[selectedRoom];
-    const labels = readings.map(r => {
+    const labels = timeline.map(r => {
       const d = new Date(r.timestamp);
-      return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     });
-    const data = readings.map(r => r.temp);
+    const roomTemps = readings.map(r => r.temp);
+    const data = new Array(labels.length - roomTemps.length).fill(null).concat(roomTemps);
     const color = getColor(selectedRoom);
 
-    const hvacStatuses = getHvacStatuses(readings);
+    const hvacStatuses = getHvacStatuses(timeline);
 
     document.getElementById('chart-title').textContent = selectedRoom.toUpperCase();
-    document.getElementById('chart-subtitle').textContent = `${readings.length} readings · Last: ${data[data.length-1].toFixed(1)}°F`;
+    document.getElementById('chart-subtitle').textContent = `${readings.length} readings · Last: ${roomTemps[roomTemps.length-1].toFixed(1)}°F`;
 
     if (chart) chart.destroy();
 
@@ -627,12 +654,8 @@
     canvas.style.display = 'block';
     empty.style.display = 'none';
 
-    // Build a common set of time labels from the room with the most readings
-    let maxRoom = rooms[0];
-    rooms.forEach(r => {
-      if (roomData[r].length > roomData[maxRoom].length) maxRoom = r;
-    });
-    const labels = roomData[maxRoom].map(r => {
+    const timeline = getCommonTimeline();
+    const labels = timeline.map(r => {
       const d = new Date(r.timestamp);
       return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     });
@@ -656,7 +679,7 @@
     document.getElementById('all-chart-subtitle').textContent =
       `${rooms.length} sources · Updated ${new Date().toLocaleTimeString()}`;
 
-    const allHvacStatuses = getHvacStatuses(roomData[maxRoom]);
+    const allHvacStatuses = getHvacStatuses(timeline);
 
     if (allChart) allChart.destroy();
 
