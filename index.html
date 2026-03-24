@@ -434,6 +434,7 @@
   let roomData = {};
   let ventData = {};
   let hvacData = [];
+  let ecobeeData = {};
   let selectedRoom = null;
   let chart = null;
   let allChart = null;
@@ -543,6 +544,36 @@
     }).join('');
   }
 
+  // Returns setpoint datasets for heat/cool reference lines
+  function getSetpointDatasets(length) {
+    const datasets = [];
+    if (ecobeeData.setpoint_heat) {
+      datasets.push({
+        label: `Heat Setpoint (${ecobeeData.setpoint_heat}°F)`,
+        data: new Array(length).fill(ecobeeData.setpoint_heat),
+        borderColor: 'rgba(255,120,50,0.6)',
+        borderWidth: 1.5,
+        borderDash: [6, 4],
+        pointRadius: 0,
+        fill: false,
+        tension: 0,
+      });
+    }
+    if (ecobeeData.setpoint_cool) {
+      datasets.push({
+        label: `Cool Setpoint (${ecobeeData.setpoint_cool}°F)`,
+        data: new Array(length).fill(ecobeeData.setpoint_cool),
+        borderColor: 'rgba(50,160,255,0.6)',
+        borderWidth: 1.5,
+        borderDash: [6, 4],
+        pointRadius: 0,
+        fill: false,
+        tension: 0,
+      });
+    }
+    return datasets;
+  }
+
   // Returns the readings of the room with the most data points — used as the common x-axis
   function getCommonTimeline() {
     const rooms = Object.keys(roomData);
@@ -592,16 +623,19 @@
       type: 'line',
       data: {
         labels,
-        datasets: [{
-          data,
-          borderColor: color,
-          backgroundColor: color + '18',
-          borderWidth: 2,
-          pointRadius: readings.length > 30 ? 0 : 3,
-          pointBackgroundColor: color,
-          tension: 0.3,
-          fill: true,
-        }]
+        datasets: [
+          {
+            data,
+            borderColor: color,
+            backgroundColor: color + '18',
+            borderWidth: 2,
+            pointRadius: readings.length > 30 ? 0 : 3,
+            pointBackgroundColor: color,
+            tension: 0.3,
+            fill: true,
+          },
+          ...getSetpointDatasets(labels.length)
+        ]
       },
       options: {
         responsive: true,
@@ -609,7 +643,17 @@
         animation: { duration: 300 },
         plugins: {
           hvacBg: { statuses: hvacStatuses },
-          legend: { display: false },
+          legend: {
+            display: true,
+            position: 'top',
+            labels: {
+              color: '#8a96aa',
+              font: { family: 'Share Tech Mono', size: 11 },
+              boxWidth: 12,
+              padding: 10,
+              filter: item => item.text !== undefined
+            }
+          },
           tooltip: {
           backgroundColor: '#13161b',
           borderColor: '#1e2330',
@@ -660,21 +704,23 @@
       return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     });
 
-    const datasets = rooms.map(room => {
-      const color = getColor(room);
-      const data = roomData[room].map(r => r.temp);
-      // Pad shorter arrays with null at the front so they align to the right
-      const padded = new Array(labels.length - data.length).fill(null).concat(data);
-      return {
-        label: room,
-        data: padded,
-        borderColor: color,
-        backgroundColor: 'transparent',
-        borderWidth: 1.5,
-        pointRadius: 0,
-        tension: 0.3,
-      };
-    });
+    const datasets = [
+      ...rooms.map(room => {
+        const color = getColor(room);
+        const data = roomData[room].map(r => r.temp);
+        const padded = new Array(labels.length - data.length).fill(null).concat(data);
+        return {
+          label: room,
+          data: padded,
+          borderColor: color,
+          backgroundColor: 'transparent',
+          borderWidth: 1.5,
+          pointRadius: 0,
+          tension: 0.3,
+        };
+      }),
+      ...getSetpointDatasets(labels.length)
+    ];
 
     document.getElementById('all-chart-subtitle').textContent =
       `${rooms.length} sources · Updated ${new Date().toLocaleTimeString()}`;
@@ -744,11 +790,12 @@
 
   async function fetchData() {
     try {
-      const [roomsRes, ventsRes, hvacRes] = await Promise.all([fetch('/rooms'), fetch('/vents'), fetch('/hvac')]);
+      const [roomsRes, ventsRes, hvacRes, ecobeeRes] = await Promise.all([fetch('/rooms'), fetch('/vents'), fetch('/hvac'), fetch('/ecobee')]);
       if (!roomsRes.ok) throw new Error();
       roomData = await roomsRes.json();
       ventData = await ventsRes.json();
       hvacData = await hvacRes.json();
+      ecobeeData = await ecobeeRes.json();
 
       document.getElementById('status-dot').className = 'dot';
       document.getElementById('status-text').textContent = 'LIVE';
