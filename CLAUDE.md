@@ -50,7 +50,8 @@ This is a two-component IoT dashboard:
 - `GET /` — serves `index.html`
 - Polls **Ambient Weather API** every 5 minutes (adds "Outside" and "Weather Station Indoor" rooms)
 - Polls **Beestat/Ecobee API** every 5 minutes (adds "Ecobee: <sensor name>" rooms + `ecobeeData`)
-- Saves `roomData` + `ventState` + `hvacLog` to `data.json` every 10 minutes; reloads last 4 hours on startup
+- Saves `roomData` + `ventState` + `hvacLog` to `data.json` every 10 minutes; reloads last 24 hours on startup
+- Appends every reading to `data-log.ndjson` (permanent log, never trimmed); backed up nightly to Dropbox via rclone (`PBH_DropBox:HomeTempDashboard/`)
 - `GET /hvac` — returns HVAC status log (`[{status: 'heat'|'cool'|'fan'|'off', timestamp}]`)
 
 **Frontend (`index.html`)** — Single-file vanilla JS dashboard, no build step:

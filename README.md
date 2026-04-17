@@ -17,7 +17,9 @@ No cloud. No subscription. Runs entirely on your local network.
 - Offline indicator on room cards (greys out after 15 min without a reading)
 - Ecobee thermostat integration via Beestat API
 - Ambient Weather outdoor sensor integration
-- Last 4 hours of data restored automatically on server restart
+- Last 24 hours of data restored automatically on server restart
+- Permanent reading log written to `data-log.ndjson` (all readings, never trimmed)
+- Automatic nightly backup of log to Dropbox via rclone
 - No npm installs, no database — pure Node.js
 
 ---
@@ -61,6 +63,37 @@ Common commands:
 - `pm2 stop homedash` — stop the server
 
 After pulling a code update: `git pull && pm2 restart homedash`
+
+---
+
+## Data Logging & Backup
+
+Every temperature reading is appended to `data-log.ndjson` in the project directory. This file grows indefinitely and is never trimmed — it's the permanent record of all readings.
+
+Format: one JSON object per line — `{"room":"Living Room","temp":72.5,"timestamp":1744800000000}`
+
+### Dropbox Backup via rclone
+
+A nightly cron job syncs `data-log.ndjson` to Dropbox automatically.
+
+**One-time setup on the RPi:**
+```bash
+# Install rclone
+curl https://rclone.org/install.sh | sudo bash
+
+# Configure Dropbox remote (follow prompts, leave client ID/secret blank)
+rclone config
+# Name the remote: PBH_DropBox
+# Type: dropbox
+# Authorize via browser when prompted
+
+# Test it
+rclone copy /home/peterh226/home-temp-dashboard/data-log.ndjson PBH_DropBox:HomeTempDashboard/ -v
+
+# Add cron job (runs at 2 AM daily)
+crontab -e
+# Add: 0 2 * * * rclone copy /home/peterh226/home-temp-dashboard/data-log.ndjson PBH_DropBox:HomeTempDashboard/ --log-file=/home/peterh226/rclone-homedash.log
+```
 
 ---
 
