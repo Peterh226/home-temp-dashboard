@@ -5,15 +5,24 @@ const path = require('path');
 
 // In-memory store: { roomName: [{temp, timestamp}] }
 const roomData = {};
-const MAX_HISTORY = 100; // keep last 100 readings per room
+const MAX_HISTORY = 288; // keep last 24 hours of readings per room (288 = 24h × 12/h)
 
 // Vent state store: { roomName: 'open' | 'closed' }
 const ventState = {};
 
 // Persistence
 const DATA_FILE = path.join(__dirname, 'data.json');
+const LOG_FILE = path.join(__dirname, 'data-log.ndjson');
 
-const HISTORY_WINDOW = 4 * 60 * 60 * 1000; // 4 hours in ms
+const HISTORY_WINDOW = 24 * 60 * 60 * 1000; // 24 hours in ms
+
+// Append a reading to the permanent log file
+function logReading(room, temp, timestamp) {
+  const line = JSON.stringify({ room, temp, timestamp }) + '\n';
+  fs.appendFile(LOG_FILE, line, (e) => {
+    if (e) console.error('Failed to write log:', e.message);
+  });
+}
 
 function saveData() {
   try {
@@ -28,7 +37,7 @@ function loadData() {
     const saved = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
     const cutoff = Date.now() - HISTORY_WINDOW;
 
-    // Restore room data, trimmed to last 4 hours then capped at MAX_HISTORY
+    // Restore room data, trimmed to last 24 hours then capped at MAX_HISTORY
     for (const room of Object.keys(saved.roomData || {})) {
       const filtered = saved.roomData[room].filter(r => r.timestamp >= cutoff);
       if (filtered.length > 0) roomData[room] = filtered.slice(-MAX_HISTORY);
@@ -37,12 +46,12 @@ function loadData() {
     // Restore vent state
     Object.assign(ventState, saved.ventState || {});
 
-    // Restore hvac log, filtered to last 4 hours
+    // Restore hvac log, filtered to last 24 hours
     hvacLog = (saved.hvacLog || []).filter(e => e.timestamp >= cutoff);
 
     const roomCount = Object.keys(roomData).length;
     const totalReadings = Object.values(roomData).reduce((s, r) => s + r.length, 0);
-    console.log(`Loaded saved data: ${roomCount} room(s), ${totalReadings} readings, ${hvacLog.length} HVAC entries (cutoff: last 4h)`);
+    console.log(`Loaded saved data: ${roomCount} room(s), ${totalReadings} readings, ${hvacLog.length} HVAC entries (cutoff: last 24h)`);
   } catch (e) {
     // No saved data — starting fresh
   }
@@ -104,8 +113,10 @@ const server = http.createServer((req, res) => {
         if (resolvedRoom.length > 64) throw new Error('Room name too long');
         if (Object.keys(roomData).length >= 50 && !roomData[resolvedRoom]) throw new Error('Too many rooms');
         if (!roomData[resolvedRoom]) roomData[resolvedRoom] = [];
-        roomData[resolvedRoom].push({ temp: tempNum, timestamp: Date.now() });
+        const ts = Date.now();
+        roomData[resolvedRoom].push({ temp: tempNum, timestamp: ts });
         if (roomData[resolvedRoom].length > MAX_HISTORY) roomData[resolvedRoom].shift();
+        logReading(resolvedRoom, tempNum, ts);
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ok: true, room: resolvedRoom }));
         console.log(`[${new Date().toLocaleTimeString()}] ${resolvedRoom}: ${tempNum}°F`);
@@ -236,18 +247,22 @@ function fetchAmbientWeather() {
         // Outdoor temperature
         if (d.tempf !== undefined) {
           const room = 'Outside';
+          const temp = parseFloat(d.tempf);
           if (!roomData[room]) roomData[room] = [];
-          roomData[room].push({ temp: parseFloat(d.tempf), timestamp: now });
+          roomData[room].push({ temp, timestamp: now });
           if (roomData[room].length > MAX_HISTORY) roomData[room].shift();
+          logReading(room, temp, now);
           console.log(`[${new Date().toLocaleTimeString()}] ${room}: ${d.tempf}°F (ambient)`);
         }
 
         // Indoor temperature (from base station)
         if (d.tempinf !== undefined) {
           const room = 'Weather Station Indoor';
+          const temp = parseFloat(d.tempinf);
           if (!roomData[room]) roomData[room] = [];
-          roomData[room].push({ temp: parseFloat(d.tempinf), timestamp: now });
+          roomData[room].push({ temp, timestamp: now });
           if (roomData[room].length > MAX_HISTORY) roomData[room].shift();
+          logReading(room, temp, now);
           console.log(`[${new Date().toLocaleTimeString()}] ${room}: ${d.tempinf}°F (ambient)`);
         }
       } catch (e) {
@@ -316,7 +331,7 @@ async function fetchBeestat() {
         timestamp: now
       };
 
-      // Append to hvac log, trim to 4-hour window
+      // Append to hvac log, trim to 24-hour window
       hvacLog.push({ status: hvacStatus, timestamp: now });
       const cutoff = Date.now() - HISTORY_WINDOW;
       hvacLog = hvacLog.filter(e => e.timestamp >= cutoff);
@@ -329,9 +344,11 @@ async function fetchBeestat() {
       const s = sensors[sId];
       if (s.temperature === null) continue;
       const room = `Ecobee: ${s.name}`;
+      const temp = parseFloat(s.temperature);
       if (!roomData[room]) roomData[room] = [];
-      roomData[room].push({ temp: parseFloat(s.temperature), timestamp: now });
+      roomData[room].push({ temp, timestamp: now });
       if (roomData[room].length > MAX_HISTORY) roomData[room].shift();
+      logReading(room, temp, now);
       console.log(`[${new Date().toLocaleTimeString()}] ${room}: ${s.temperature}°F (beestat)`);
     }
   } catch (e) {
