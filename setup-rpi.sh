@@ -22,15 +22,19 @@ banner(){ echo -e "\n${CYAN}$1${NC}"; }
 step "Updating system packages..."
 sudo apt update && sudo apt upgrade -y
 
-# ── 2. Node.js ──────────────────────────────────────────────────────────────
-step "Installing Node.js 22 LTS..."
-curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
-sudo apt install -y nodejs
+# ── 2. Node.js (via nvm — supports armhf and arm64) ────────────────────────
+step "Installing Node.js 22 LTS via nvm..."
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
+export NVM_DIR="$HOME/.nvm"
+# shellcheck source=/dev/null
+\. "$NVM_DIR/nvm.sh"
+nvm install --lts
+nvm use --lts
 info "Node $(node -v) / npm $(npm -v)"
 
 # ── 3. pm2 ──────────────────────────────────────────────────────────────────
 step "Installing pm2..."
-sudo npm install -g pm2
+npm install -g pm2
 info "pm2 $(pm2 -v)"
 
 # ── 4. rclone ───────────────────────────────────────────────────────────────
@@ -61,6 +65,7 @@ fi
 pm2 save
 
 # ── 7. pm2: enable on boot ──────────────────────────────────────────────────
+# pm2 startup embeds the absolute nvm node path, so boot works without nvm sourced
 step "Enabling pm2 on system boot..."
 STARTUP_CMD=$(pm2 startup 2>&1 | grep "sudo env" || true)
 if [ -n "$STARTUP_CMD" ]; then
