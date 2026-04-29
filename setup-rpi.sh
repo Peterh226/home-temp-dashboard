@@ -23,13 +23,17 @@ step "Updating system packages..."
 sudo apt update && sudo apt upgrade -y
 
 # ── 2. Node.js (via nvm — supports armhf and arm64) ────────────────────────
+# Node 22 is the last LTS with armv7l builds; Node 24+ dropped armv7l.
+# set -u is temporarily disabled because nvm scripts use unbound variables.
 step "Installing Node.js 22 LTS via nvm..."
 curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
+set +u
 export NVM_DIR="$HOME/.nvm"
 # shellcheck source=/dev/null
 \. "$NVM_DIR/nvm.sh"
-nvm install --lts
-nvm use --lts
+nvm install 22
+nvm use 22
+set -u
 info "Node $(node -v) / npm $(npm -v)"
 
 # ── 3. pm2 ──────────────────────────────────────────────────────────────────
