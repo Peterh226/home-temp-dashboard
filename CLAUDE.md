@@ -19,10 +19,12 @@ pm2 keeps the server running and auto-starts it on system boot.
 ```bash
 npm install -g pm2
 cd /path/to/HomeTempDashboard
-pm2 start server.js --name homedash
+pm2 start server.js --name homedash --interpreter $(which node)
 pm2 startup          # follow the printed command to enable auto-start on boot
 pm2 save             # save process list so it survives reboots
 ```
+
+> **Never use `sudo pm2`** — it registers the process under root's pm2, which conflicts with the user-level pm2 and causes port 3000 to be held by a separate process that auto-restarts. If this happens: `sudo pm2 delete homedash && sudo pm2 save`, then restart the user-level process.
 
 **After pulling a code update:**
 ```bash
