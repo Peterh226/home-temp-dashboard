@@ -366,6 +366,27 @@
     font-family: 'Share Tech Mono', monospace;
     font-size: 12px;
   }
+
+  .page-nav {
+    display: flex;
+    gap: 2px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 3px;
+  }
+  .nav-link {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 12px;
+    letter-spacing: 0.12em;
+    text-decoration: none;
+    color: var(--muted);
+    padding: 5px 14px;
+    border-radius: 4px;
+    transition: color 0.2s;
+  }
+  .nav-link:hover { color: var(--text); }
+  .nav-link.active { background: rgba(0,229,255,0.1); color: var(--accent); }
 </style>
 </head>
 <body>
@@ -378,6 +399,10 @@
       <p>ESP32 / ESP8266 SENSOR NETWORK</p>
     </div>
   </div>
+  <nav class="page-nav">
+    <a href="/" class="nav-link active">DASHBOARD</a>
+    <a href="/analysis" class="nav-link">ANALYSIS</a>
+  </nav>
   <div class="header-right">
     <div class="status-dot">
       <div class="dot" id="status-dot"></div>

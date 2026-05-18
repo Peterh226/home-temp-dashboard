@@ -1,0 +1,621 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Home Temp — Analysis</title>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Barlow:wght@300;400;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0d0f12;
+    --panel: #13161b;
+    --border: #1e2330;
+    --accent: #00e5ff;
+    --warm: #ff9f43;
+    --text: #c8d0e0;
+    --muted: #8a96aa;
+    --hot: #ff4757;
+    --ok: #2ed573;
+    --cool: #48dbfb;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Barlow', sans-serif;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.03) 2px, rgba(0,0,0,0.03) 4px);
+    pointer-events: none;
+    z-index: 1000;
+  }
+
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 18px 32px;
+    border-bottom: 1px solid var(--border);
+    background: var(--panel);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+
+  .logo { display: flex; align-items: center; gap: 12px; }
+  .logo-icon {
+    width: 32px; height: 32px;
+    border: 2px solid var(--accent); border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 16px; color: var(--accent);
+    box-shadow: 0 0 12px rgba(0,229,255,0.3);
+  }
+  .logo h1 { font-size: 15px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: #fff; }
+  .logo p { font-family: 'Share Tech Mono', monospace; font-size: 10px; color: var(--muted); letter-spacing: 0.08em; }
+
+  .page-nav {
+    display: flex;
+    gap: 2px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 3px;
+  }
+  .nav-link {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 12px;
+    letter-spacing: 0.12em;
+    text-decoration: none;
+    color: var(--muted);
+    padding: 5px 14px;
+    border-radius: 4px;
+    transition: color 0.2s;
+  }
+  .nav-link:hover { color: var(--text); }
+  .nav-link.active { background: rgba(0,229,255,0.1); color: var(--accent); }
+
+  .coverage-strip {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    color: var(--muted);
+    letter-spacing: 0.07em;
+    text-align: right;
+  }
+  .cov-sep { margin: 0 7px; opacity: 0.35; }
+  .cov-note { color: var(--warm); margin-left: 10px; }
+
+  main {
+    padding: 28px 32px;
+    max-width: 1400px;
+    margin: 0 auto;
+  }
+
+  .loading-msg {
+    text-align: center;
+    padding: 80px 20px;
+    color: var(--muted);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 12px;
+    letter-spacing: 0.2em;
+  }
+
+  .section-label {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 12px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 14px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .section-label::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+
+  /* Insight cards */
+  .insight-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 14px;
+    margin-bottom: 36px;
+  }
+
+  .insight-card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 24px;
+    position: relative;
+    overflow: hidden;
+  }
+  .insight-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: var(--card-color, var(--accent));
+  }
+
+  .ic-title {
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: #fff;
+    margin-bottom: 3px;
+  }
+  .ic-subtitle {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 10px;
+    color: var(--muted);
+    letter-spacing: 0.08em;
+    margin-bottom: 18px;
+  }
+
+  .ic-temp {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 46px;
+    font-weight: 400;
+    color: #fff;
+    line-height: 1;
+    margin-bottom: 14px;
+  }
+  .ic-unit { font-size: 18px; color: var(--muted); }
+
+  .ic-delta {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 15px;
+    font-weight: 700;
+    padding: 7px 12px;
+    border-radius: 4px;
+    margin-bottom: 16px;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid var(--border);
+  }
+  .ic-delta-label {
+    font-size: 11px;
+    font-weight: 400;
+    letter-spacing: 0.05em;
+    opacity: 0.75;
+  }
+
+  .delta-cold { color: var(--cool); }
+  .delta-warm { color: var(--warm); }
+  .delta-ok   { color: var(--ok); }
+  .delta-none { color: var(--muted); }
+
+  .ic-meta {
+    display: flex;
+    justify-content: space-between;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 10px;
+    color: var(--muted);
+    letter-spacing: 0.06em;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+  }
+
+  .ic-room-name {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 9px;
+    color: var(--border);
+    margin-top: 8px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+
+  /* Chart panels */
+  .chart-panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 24px;
+    margin-bottom: 36px;
+  }
+
+  .chart-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    margin-bottom: 20px;
+  }
+  .chart-title {
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #fff;
+  }
+  .chart-subtitle {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 3px;
+  }
+  .chart-badge {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    color: var(--muted);
+    letter-spacing: 0.08em;
+    white-space: nowrap;
+  }
+
+  .chart-wrap { position: relative; }
+
+  .empty-msg {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 56px 20px;
+    color: var(--muted);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 12px;
+    letter-spacing: 0.15em;
+    text-align: center;
+    gap: 10px;
+  }
+  .empty-icon { font-size: 34px; margin-bottom: 6px; }
+  .empty-sub {
+    font-size: 11px;
+    letter-spacing: 0.05em;
+    max-width: 420px;
+    line-height: 1.7;
+    color: var(--muted);
+    opacity: 0.6;
+  }
+
+  .no-data {
+    color: var(--muted);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 12px;
+    padding: 20px;
+    text-align: center;
+    letter-spacing: 0.1em;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <div class="logo-icon">🌡</div>
+    <div>
+      <h1>Home Temp Monitor</h1>
+      <p>ESP32 / ESP8266 SENSOR NETWORK</p>
+    </div>
+  </div>
+  <nav class="page-nav">
+    <a href="/" class="nav-link">DASHBOARD</a>
+    <a href="/analysis" class="nav-link active">ANALYSIS</a>
+  </nav>
+  <div>
+    <div id="coverage" class="coverage-strip">LOADING...</div>
+  </div>
+</header>
+
+<main>
+  <div id="loading-msg" class="loading-msg">COMPUTING ANALYSIS...</div>
+
+  <div id="analysis-content" style="display:none;">
+
+    <div class="section-label">KEY INSIGHTS</div>
+    <div id="insight-cards" class="insight-grid"></div>
+
+    <div class="section-label">ROOM VS SETPOINT BY PERIOD</div>
+    <div class="chart-panel">
+      <div class="chart-header">
+        <div>
+          <div class="chart-title">TEMPERATURE DELTA FROM HEAT SETPOINT</div>
+          <div class="chart-subtitle">Positive = above setpoint &nbsp;·&nbsp; Negative = below setpoint &nbsp;·&nbsp; Target = 0</div>
+        </div>
+      </div>
+      <div id="delta-wrap" class="chart-wrap" style="height:300px;">
+        <canvas id="delta-chart"></canvas>
+      </div>
+      <div id="delta-empty" class="empty-msg" style="display:none;">
+        <div class="empty-icon">📊</div>
+        <div>SETPOINT TRACKING STARTING TODAY</div>
+        <div class="empty-sub">Delta comparison data will appear once the server has logged temperature readings alongside setpoint data. Check back tomorrow.</div>
+      </div>
+    </div>
+
+    <div class="section-label">HVAC RESPONSE TIME</div>
+    <div class="chart-panel">
+      <div class="chart-header">
+        <div>
+          <div class="chart-title">AVG MINUTES TO REACH SETPOINT PER ROOM</div>
+          <div class="chart-subtitle">After HVAC transitions from off → heat or off → cool &nbsp;·&nbsp; Within 0.5°F of target</div>
+        </div>
+        <div id="hvac-badge" class="chart-badge"></div>
+      </div>
+      <div id="hvac-wrap" class="chart-wrap" style="height:300px;">
+        <canvas id="hvac-chart"></canvas>
+      </div>
+      <div id="hvac-empty" class="empty-msg" style="display:none;">
+        <div class="empty-icon">⏱</div>
+        <div>ACCUMULATING HVAC DATA</div>
+        <div class="empty-sub">Response-time data will appear after several heating or cooling cycles have been logged. HVAC transition tracking started today.</div>
+      </div>
+    </div>
+
+  </div>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<script>
+  const WINDOWS = ['sleep', 'evening', 'day'];
+  const WINDOW_LABELS = {
+    sleep:   'Sleep (11PM–8AM)',
+    evening: 'Evening (6PM–11PM)',
+    day:     'Day (8AM–6PM)',
+  };
+  const WINDOW_COLORS = {
+    sleep:   '#a29bfe',
+    evening: '#fdcb6e',
+    day:     '#00e5ff',
+  };
+
+  const EXCLUDE_ROOMS = ['Outside', 'Weather Station Indoor'];
+
+  function findRoom(roomAnalysis, candidates) {
+    return candidates.find(r => roomAnalysis[r]);
+  }
+
+  function deltaClass(d) {
+    if (d === null) return 'delta-none';
+    if (Math.abs(d) <= 0.5) return 'delta-ok';
+    return d < 0 ? 'delta-cold' : 'delta-warm';
+  }
+
+  function deltaDesc(d) {
+    if (d === null) return 'No setpoint data yet';
+    if (Math.abs(d) <= 0.5) return 'On target';
+    const abs = Math.abs(d).toFixed(1);
+    return d < 0 ? `${abs}°F below setpoint` : `${abs}°F above setpoint`;
+  }
+
+  function makeInsightCard(title, subtitle, room, stats, color) {
+    const d = stats.avgDelta;
+    const sign = d !== null && d > 0 ? '+' : '';
+    const dStr = d !== null ? `${sign}${d.toFixed(1)}°F` : '—';
+    return `
+      <div class="insight-card" style="--card-color:${color}">
+        <div class="ic-title">${title}</div>
+        <div class="ic-subtitle">${subtitle}</div>
+        <div class="ic-temp">${stats.avgTemp.toFixed(1)}<span class="ic-unit">°F avg</span></div>
+        <div class="ic-delta ${deltaClass(d)}">
+          <span>${dStr}</span>
+          <span class="ic-delta-label">${deltaDesc(d)}</span>
+        </div>
+        <div class="ic-meta">
+          <span>RANGE ${stats.minTemp.toFixed(1)}–${stats.maxTemp.toFixed(1)}°F</span>
+          <span>${stats.count.toLocaleString()} readings</span>
+        </div>
+        <div class="ic-room-name">${room}</div>
+      </div>
+    `;
+  }
+
+  function renderInsightCards(data) {
+    const { roomAnalysis } = data;
+    const html = [];
+
+    const bedroom = findRoom(roomAnalysis, ['Ecobee: Bedroom', 'Master Bedroom']);
+    if (bedroom && roomAnalysis[bedroom].sleep) {
+      html.push(makeInsightCard('BEDROOM', 'SLEEP · 11PM–8AM', bedroom, roomAnalysis[bedroom].sleep, '#a29bfe'));
+    }
+
+    const living = findRoom(roomAnalysis, ['Living Room', 'Ecobee: Living Room', 'Ecobee: Home']);
+    if (living && roomAnalysis[living].evening) {
+      html.push(makeInsightCard('LIVING ROOM', 'EVENING · 6PM–11PM', living, roomAnalysis[living].evening, '#fdcb6e'));
+    }
+
+    if (roomAnalysis['She Shack']) {
+      const allW = WINDOWS.map(w => roomAnalysis['She Shack'][w]).filter(Boolean);
+      if (allW.length > 0) {
+        const totalN = allW.reduce((s, w) => s + w.count, 0);
+        const hasDelta = allW.some(w => w.avgDelta !== null);
+        const combined = {
+          avgTemp: parseFloat((allW.reduce((s, w) => s + w.avgTemp * w.count, 0) / totalN).toFixed(1)),
+          avgDelta: hasDelta ? parseFloat((allW.reduce((s, w) => s + (w.avgDelta ?? 0) * w.count, 0) / totalN).toFixed(1)) : null,
+          count: totalN,
+          minTemp: Math.min(...allW.map(w => w.minTemp)),
+          maxTemp: Math.max(...allW.map(w => w.maxTemp)),
+        };
+        html.push(makeInsightCard('SHE SHACK', 'ALL HOURS', 'She Shack', combined, '#55efc4'));
+      }
+    }
+
+    const container = document.getElementById('insight-cards');
+    container.innerHTML = html.length
+      ? html.join('')
+      : '<div class="no-data">NOT ENOUGH DATA YET — CHECK BACK AFTER READINGS ACCUMULATE</div>';
+  }
+
+  function renderDeltaChart(data) {
+    const wrap = document.getElementById('delta-wrap');
+    const empty = document.getElementById('delta-empty');
+    const { roomAnalysis, hasSetpointData } = data;
+
+    const rooms = Object.keys(roomAnalysis)
+      .filter(r => !EXCLUDE_ROOMS.includes(r))
+      .filter(r => WINDOWS.some(w => roomAnalysis[r][w]?.avgDelta !== null))
+      .sort();
+
+    if (!hasSetpointData || rooms.length === 0) {
+      wrap.style.display = 'none';
+      empty.style.display = 'flex';
+      return;
+    }
+
+    wrap.style.height = Math.max(300, rooms.length * 58 + 100) + 'px';
+
+    const datasets = WINDOWS.map(w => ({
+      label: WINDOW_LABELS[w],
+      data: rooms.map(r => roomAnalysis[r][w]?.avgDelta ?? null),
+      backgroundColor: WINDOW_COLORS[w] + '88',
+      borderColor: WINDOW_COLORS[w],
+      borderWidth: 1,
+      borderRadius: 3,
+      borderSkipped: false,
+    }));
+
+    new Chart(document.getElementById('delta-chart'), {
+      type: 'bar',
+      data: { labels: rooms, datasets },
+      options: {
+        indexAxis: 'y',
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: {
+            display: true,
+            labels: { color: '#8a96aa', font: { family: 'Share Tech Mono', size: 11 }, boxWidth: 12, padding: 12 }
+          },
+          tooltip: {
+            backgroundColor: '#13161b',
+            borderColor: '#1e2330',
+            borderWidth: 1,
+            titleColor: '#c8d0e0',
+            bodyColor: '#c8d0e0',
+            callbacks: {
+              label: ctx => {
+                const v = ctx.parsed.x;
+                if (v === null || isNaN(v)) return ` ${ctx.dataset.label}: no data`;
+                const sign = v >= 0 ? '+' : '';
+                return ` ${ctx.dataset.label}: ${sign}${v.toFixed(1)}°F vs heat setpoint`;
+              }
+            }
+          }
+        },
+        scales: {
+          x: {
+            title: { display: true, text: '°F from heat setpoint', color: '#8a96aa', font: { family: 'Share Tech Mono', size: 10 } },
+            ticks: { color: '#8a96aa', font: { family: 'Share Tech Mono', size: 11 }, callback: v => (v > 0 ? '+' : '') + v + '°' },
+            grid: { color: '#1e2330' },
+            border: { color: '#1e2330' },
+          },
+          y: {
+            ticks: { color: '#c8d0e0', font: { family: 'Share Tech Mono', size: 11 } },
+            grid: { color: '#1e2330' },
+            border: { color: '#1e2330' }
+          }
+        }
+      }
+    });
+  }
+
+  function renderHvacChart(data) {
+    const wrap = document.getElementById('hvac-wrap');
+    const empty = document.getElementById('hvac-empty');
+    const badge = document.getElementById('hvac-badge');
+    const { avgResponseTime, hvacSessionCount, hasHvacData } = data;
+
+    const rooms = Object.keys(avgResponseTime || {})
+      .filter(r => !EXCLUDE_ROOMS.includes(r))
+      .sort((a, b) => avgResponseTime[a] - avgResponseTime[b]);
+
+    if (!hasHvacData || rooms.length === 0) {
+      wrap.style.display = 'none';
+      empty.style.display = 'flex';
+      return;
+    }
+
+    badge.textContent = `${hvacSessionCount} SESSIONS ANALYZED`;
+    wrap.style.height = Math.max(200, rooms.length * 52 + 100) + 'px';
+
+    new Chart(document.getElementById('hvac-chart'), {
+      type: 'bar',
+      data: {
+        labels: rooms,
+        datasets: [{
+          label: 'Avg minutes to reach setpoint',
+          data: rooms.map(r => avgResponseTime[r]),
+          backgroundColor: '#00e5ff2a',
+          borderColor: '#00e5ff',
+          borderWidth: 1,
+          borderRadius: 3,
+          borderSkipped: false,
+        }]
+      },
+      options: {
+        indexAxis: 'y',
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            backgroundColor: '#13161b',
+            borderColor: '#1e2330',
+            borderWidth: 1,
+            titleColor: '#c8d0e0',
+            bodyColor: '#c8d0e0',
+            callbacks: { label: ctx => ` ${ctx.parsed.x} min avg to reach setpoint` }
+          }
+        },
+        scales: {
+          x: {
+            title: { display: true, text: 'minutes after HVAC start', color: '#8a96aa', font: { family: 'Share Tech Mono', size: 10 } },
+            ticks: { color: '#8a96aa', font: { family: 'Share Tech Mono', size: 11 } },
+            grid: { color: '#1e2330' },
+            border: { color: '#1e2330' }
+          },
+          y: {
+            ticks: { color: '#c8d0e0', font: { family: 'Share Tech Mono', size: 11 } },
+            grid: { color: '#1e2330' },
+            border: { color: '#1e2330' }
+          }
+        }
+      }
+    });
+  }
+
+  async function loadAnalysis() {
+    try {
+      const res = await fetch('/analysis-data');
+      const data = await res.json();
+
+      document.getElementById('loading-msg').style.display = 'none';
+      document.getElementById('analysis-content').style.display = 'block';
+
+      // Coverage strip
+      const cov = document.getElementById('coverage');
+      if (data.noData || !data.totalReadings) {
+        cov.textContent = 'NO DATA YET';
+      } else {
+        const fmt = ts => new Date(ts).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        const from = data.firstTs ? fmt(data.firstTs) : '—';
+        const to = data.lastTs ? fmt(data.lastTs) : '—';
+        cov.innerHTML =
+          `<span>${data.days}D DATA</span><span class="cov-sep">·</span>` +
+          `<span>${data.totalReadings.toLocaleString()} READINGS</span><span class="cov-sep">·</span>` +
+          `<span>${data.rooms.length} ROOMS</span><span class="cov-sep">·</span>` +
+          `<span>${from} – ${to}</span>` +
+          (!data.hasSetpointData ? '<span class="cov-note">SETPOINT TRACKING NEW</span>' : '') +
+          (!data.hasHvacData ? '<span class="cov-note">HVAC TRACKING NEW</span>' : '');
+      }
+
+      renderInsightCards(data);
+      renderDeltaChart(data);
+      renderHvacChart(data);
+    } catch (e) {
+      document.getElementById('loading-msg').textContent = 'FAILED TO LOAD ANALYSIS DATA';
+    }
+  }
+
+  loadAnalysis();
+</script>
+</body>
+</html>

@@ -2,6 +2,7 @@ const http = require('http');
 const https = require('https');
 const fs = require('fs');
 const path = require('path');
+const readline = require('readline');
 
 // In-memory store: { roomName: [{temp, timestamp}] }
 const roomData = {};
@@ -18,10 +19,15 @@ const HISTORY_WINDOW = 24 * 60 * 60 * 1000; // 24 hours in ms
 
 // Append a reading to the permanent log file
 function logReading(room, temp, timestamp) {
-  const line = JSON.stringify({ room, temp, timestamp }) + '\n';
+  const line = JSON.stringify({ type: 'temp', room, temp, timestamp }) + '\n';
   fs.appendFile(LOG_FILE, line, (e) => {
     if (e) console.error('Failed to write log:', e.message);
   });
+}
+
+function logEvent(obj) {
+  const line = JSON.stringify(obj) + '\n';
+  fs.appendFile(LOG_FILE, line, e => { if (e) console.error('Log write error:', e.message); });
 }
 
 function saveData() {
@@ -80,6 +86,8 @@ let ecobeeData = null;
 
 // HVAC status log: [{ status: 'heat'|'cool'|'fan'|'off', timestamp }]
 let hvacLog = [];
+let lastHvacStatus = null;
+let lastSetpointKey = null;
 
 const server = http.createServer((req, res) => {
   // CORS headers
@@ -190,6 +198,27 @@ const server = http.createServer((req, res) => {
       }
       res.writeHead(200, { 'Content-Type': 'text/html' });
       res.end(data);
+    });
+    return;
+  }
+
+  if (req.method === 'GET' && req.url === '/analysis') {
+    const filePath = path.join(__dirname, 'analysis.html');
+    fs.readFile(filePath, (err, data) => {
+      if (err) { res.writeHead(500); res.end('Error loading analysis page'); return; }
+      res.writeHead(200, { 'Content-Type': 'text/html' });
+      res.end(data);
+    });
+    return;
+  }
+
+  if (req.method === 'GET' && req.url === '/analysis-data') {
+    computeAnalysis().then(data => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(data));
+    }).catch(e => {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: e.message }));
     });
     return;
   }
@@ -336,6 +365,17 @@ async function fetchBeestat() {
       const cutoff = Date.now() - HISTORY_WINDOW;
       hvacLog = hvacLog.filter(e => e.timestamp >= cutoff);
 
+      // Log HVAC transitions and setpoint changes to permanent log
+      if (hvacStatus !== lastHvacStatus) {
+        logEvent({ type: 'hvac', status: hvacStatus, timestamp: now });
+        lastHvacStatus = hvacStatus;
+      }
+      const spKey = `${t.setpoint_heat}:${t.setpoint_cool}:${ecobeeData.program}`;
+      if (spKey !== lastSetpointKey) {
+        logEvent({ type: 'setpoint', heat: t.setpoint_heat, cool: t.setpoint_cool, program: ecobeeData.program, timestamp: now });
+        lastSetpointKey = spKey;
+      }
+
       console.log(`[${new Date().toLocaleTimeString()}] Ecobee: ${t.temperature}°F, heat:${t.setpoint_heat} cool:${t.setpoint_cool}, program:${ecobeeData.program}, hvac:${hvacStatus} [${t.running_equipment || 'none'}]`);
     }
 
@@ -354,6 +394,160 @@ async function fetchBeestat() {
   } catch (e) {
     console.error('Beestat fetch error:', e.message);
   }
+}
+
+// Analysis computation (cached 10 min, covers last 90 days of temp readings)
+let analysisCache = null;
+let analysisCacheTime = 0;
+const ANALYSIS_CACHE_MS = 10 * 60 * 1000;
+const ANALYSIS_DAYS = 90;
+
+function getAnalysisWindow(ts) {
+  const h = new Date(ts).getHours();
+  if (h >= 23 || h < 8) return 'sleep';
+  if (h >= 18) return 'evening';
+  return 'day';
+}
+
+async function computeAnalysis() {
+  if (analysisCache && Date.now() - analysisCacheTime < ANALYSIS_CACHE_MS) return analysisCache;
+
+  const tsCutoff = Date.now() - ANALYSIS_DAYS * 24 * 60 * 60 * 1000;
+  const tempRecords = [];
+  const hvacRecords = [];
+  const setpointRecords = [];
+  let firstTs = Infinity, lastTs = 0;
+
+  try {
+    await new Promise((resolve, reject) => {
+      const stream = fs.createReadStream(LOG_FILE);
+      stream.on('error', reject);
+      const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+      rl.on('line', line => {
+        if (!line.trim()) return;
+        try {
+          const obj = JSON.parse(line);
+          const type = obj.type || 'temp';
+          if (!obj.timestamp) return;
+          if (obj.timestamp < firstTs) firstTs = obj.timestamp;
+          if (obj.timestamp > lastTs) lastTs = obj.timestamp;
+          if (type === 'temp' && obj.timestamp >= tsCutoff && obj.room && obj.temp !== undefined) {
+            tempRecords.push(obj);
+          } else if (type === 'hvac' && obj.status) {
+            hvacRecords.push(obj);
+          } else if (type === 'setpoint' && obj.heat !== undefined) {
+            setpointRecords.push(obj);
+          }
+        } catch {}
+      });
+      rl.on('close', resolve);
+      rl.on('error', reject);
+    });
+  } catch (e) {
+    if (e.code !== 'ENOENT') console.error('Analysis read error:', e.message);
+    return (analysisCache = { noData: true, totalReadings: 0, days: 0, rooms: [], roomAnalysis: {}, avgResponseTime: {}, hvacSessionCount: 0, hasSetpointData: false, hasHvacData: false });
+  }
+
+  setpointRecords.sort((a, b) => a.timestamp - b.timestamp);
+  hvacRecords.sort((a, b) => a.timestamp - b.timestamp);
+  tempRecords.sort((a, b) => a.timestamp - b.timestamp);
+
+  function getActiveSetpoint(ts) {
+    let sp = null;
+    for (const s of setpointRecords) {
+      if (s.timestamp <= ts) sp = s;
+      else break;
+    }
+    return sp;
+  }
+
+  // Accumulate per-room per-window stats
+  const acc = {};
+  for (const r of tempRecords) {
+    if (!acc[r.room]) {
+      acc[r.room] = {
+        sleep:   { sumT: 0, sumD: 0, n: 0, nd: 0, min: Infinity, max: -Infinity },
+        evening: { sumT: 0, sumD: 0, n: 0, nd: 0, min: Infinity, max: -Infinity },
+        day:     { sumT: 0, sumD: 0, n: 0, nd: 0, min: Infinity, max: -Infinity },
+      };
+    }
+    const w = acc[r.room][getAnalysisWindow(r.timestamp)];
+    w.sumT += r.temp; w.n++;
+    if (r.temp < w.min) w.min = r.temp;
+    if (r.temp > w.max) w.max = r.temp;
+    const sp = getActiveSetpoint(r.timestamp);
+    if (sp) { w.sumD += r.temp - sp.heat; w.nd++; }
+  }
+
+  const roomAnalysis = {};
+  for (const [room, windows] of Object.entries(acc)) {
+    roomAnalysis[room] = {};
+    for (const [wName, w] of Object.entries(windows)) {
+      if (w.n === 0) continue;
+      roomAnalysis[room][wName] = {
+        avgTemp: parseFloat((w.sumT / w.n).toFixed(1)),
+        avgDelta: w.nd > 0 ? parseFloat((w.sumD / w.nd).toFixed(1)) : null,
+        count: w.n,
+        minTemp: parseFloat(w.min.toFixed(1)),
+        maxTemp: parseFloat(w.max.toFixed(1)),
+      };
+    }
+  }
+
+  // HVAC response: find on-transitions, compute per-room time-to-setpoint
+  function findTempIdx(ts) {
+    let lo = 0, hi = tempRecords.length;
+    while (lo < hi) { const m = (lo + hi) >> 1; if (tempRecords[m].timestamp < ts) lo = m + 1; else hi = m; }
+    return lo;
+  }
+
+  const sessions = [];
+  for (let i = 1; i < hvacRecords.length; i++) {
+    const prev = hvacRecords[i - 1], curr = hvacRecords[i];
+    if ((prev.status === 'off' || prev.status === 'fan') && (curr.status === 'heat' || curr.status === 'cool')) {
+      const sp = getActiveSetpoint(curr.timestamp);
+      if (!sp) continue;
+      const target = curr.status === 'heat' ? sp.heat : sp.cool;
+      const end = curr.timestamp + 2 * 60 * 60 * 1000;
+      const roomResponse = {};
+      const startIdx = findTempIdx(curr.timestamp);
+      for (let j = startIdx; j < tempRecords.length && tempRecords[j].timestamp <= end; j++) {
+        const r = tempRecords[j];
+        if (roomResponse[r.room] !== undefined) continue;
+        const reached = curr.status === 'heat' ? r.temp >= target - 0.5 : r.temp <= target + 0.5;
+        if (reached) roomResponse[r.room] = Math.round((r.timestamp - curr.timestamp) / 60000);
+      }
+      sessions.push({ mode: curr.status, roomResponse });
+    }
+  }
+
+  const rtAcc = {};
+  for (const s of sessions) {
+    for (const [room, mins] of Object.entries(s.roomResponse)) {
+      if (!rtAcc[room]) rtAcc[room] = { sum: 0, n: 0 };
+      rtAcc[room].sum += mins; rtAcc[room].n++;
+    }
+  }
+  const avgResponseTime = {};
+  for (const room of Object.keys(rtAcc)) {
+    avgResponseTime[room] = Math.round(rtAcc[room].sum / rtAcc[room].n);
+  }
+
+  const days = firstTs === Infinity ? 0 : Math.max(1, Math.round((lastTs - firstTs) / (24 * 60 * 60 * 1000)));
+
+  analysisCache = {
+    days, totalReadings: tempRecords.length,
+    firstTs: firstTs === Infinity ? null : firstTs,
+    lastTs: lastTs === 0 ? null : lastTs,
+    hasSetpointData: setpointRecords.length > 0,
+    hasHvacData: hvacRecords.length > 0,
+    rooms: Object.keys(roomAnalysis).sort(),
+    roomAnalysis, avgResponseTime,
+    hvacSessionCount: sessions.length,
+  };
+  analysisCacheTime = Date.now();
+  console.log(`[${new Date().toLocaleTimeString()}] Analysis: ${tempRecords.length} readings, ${days}d, ${sessions.length} HVAC sessions`);
+  return analysisCache;
 }
 
 const PORT = 3000;
