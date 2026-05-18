@@ -43,26 +43,40 @@ pm2 stop homedash    # stop the server
 This is a two-component IoT dashboard:
 
 **Backend (`server.js`)** — Plain Node.js HTTP server (no framework) on port 3000:
-- Stores all data in-memory (`roomData` object: `{ roomName: [{temp, timestamp}] }`, max 100 readings/room)
+- Stores all data in-memory (`roomData` object: `{ roomName: [{temp, timestamp}] }`, max 288 readings/room ≈ 24h)
 - `POST /data` — receives readings from ESP sensors (`{ mac, temp }`)
 - `GET /rooms` — returns all room data as JSON
 - `GET /vents` — returns vent open/closed state per room
 - `POST /vent` — sets vent state for a room (`{ room, state: 'open'|'closed' }`)
 - `GET /ecobee` — returns thermostat setpoint/program data
+- `GET /hvac` — returns HVAC status log (`[{status: 'heat'|'cool'|'fan'|'off', timestamp}]`)
 - `GET /` — serves `index.html`
+- `GET /analysis` — serves `analysis.html`
+- `GET /analysis-data` — returns pre-computed analysis JSON (cached 10 min, covers last 90 days)
 - Polls **Ambient Weather API** every 5 minutes (adds "Outside" and "Weather Station Indoor" rooms)
 - Polls **Beestat/Ecobee API** every 5 minutes (adds "Ecobee: <sensor name>" rooms + `ecobeeData`)
 - Saves `roomData` + `ventState` + `hvacLog` to `data.json` every 10 minutes; reloads last 24 hours on startup
-- Appends every reading to `data-log.ndjson` (permanent log, never trimmed); backed up nightly to Dropbox via rclone (`PBH_DropBox:HomeTempDashboard/`)
-- `GET /hvac` — returns HVAC status log (`[{status: 'heat'|'cool'|'fan'|'off', timestamp}]`)
+- Appends every reading to `data-log.ndjson` as `{ type: 'temp', room, temp, timestamp }`
+- Also appends to `data-log.ndjson` on HVAC transitions: `{ type: 'hvac', status, timestamp }`
+- Also appends to `data-log.ndjson` on setpoint changes: `{ type: 'setpoint', heat, cool, program, timestamp }`
+- `data-log.ndjson` is the permanent record (never trimmed); backed up nightly to Dropbox via rclone (`PBH_DropBox:HomeTempDashboard/`) — cron job runs at 2 AM on the RPi
 
-**Frontend (`index.html`)** — Single-file vanilla JS dashboard, no build step:
+**Frontend (`index.html`)** — Dashboard page, no build step:
 - Polls `/rooms` every 10 seconds
 - Room cards with color-coded temperature status (COOL <65°F / GOOD 65–74 / WARM 74–80 / HOT ≥80)
 - Vent open/closed toggle button on each room card
 - Two Chart.js charts: single-room history (click a card) + all-rooms comparison
 - "DEMO DATA" button injects client-side fake data without hitting the server
 - Consistent room colors assigned via `colorMap` (persists across re-renders)
+- Nav tabs: DASHBOARD (active) / ANALYSIS
+
+**Analysis page (`analysis.html`)** — served at `/analysis`:
+- Key insight cards: Bedroom sleep hours (11PM–8AM), Living Room evening (6–11PM), She Shack all hours
+- Each card shows avg temp, delta from heat setpoint, reading count, min/max range
+- Horizontal grouped bar chart: all rooms × time window (sleep/evening/day) vs heat setpoint delta
+- HVAC response chart: avg minutes per room to reach setpoint after heat/cool kicks on
+- Coverage strip in header shows data age, reading count, room count
+- Delta and HVAC charts show "accumulating" message until ndjson has setpoint/hvac events
 
 **Arduino (`TempSensor/`)** — ESP8266 sketch for DHT22 sensors:
 - Credentials go in `TempSensor/config.h` (gitignored); copy from `config.h.example`
