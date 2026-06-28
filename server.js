@@ -15,7 +15,8 @@ const ventState = {};
 const DATA_FILE = path.join(__dirname, 'data.json');
 const LOG_FILE = path.join(__dirname, 'data-log.ndjson');
 
-const HISTORY_WINDOW = 24 * 60 * 60 * 1000; // 24 hours in ms
+const HISTORY_WINDOW = 24 * 60 * 60 * 1000; // 24 hours in ms (in-memory cap)
+const LOAD_WINDOW   =  7 * 24 * 60 * 60 * 1000; // 7 days — ndjson scan window on startup
 
 // Append a reading to the permanent log file
 function logReading(room, temp, timestamp) {
@@ -56,8 +57,8 @@ async function loadData() {
   const stat = fs.statSync(LOG_FILE);
   console.log(`Reading ndjson log (${(stat.size / 1024).toFixed(0)} KB)...`);
 
-  const cutoff = Date.now() - HISTORY_WINDOW;
-  console.log(`Cutoff: ${new Date(cutoff).toISOString()} (${cutoff})`);
+  const cutoff = Date.now() - LOAD_WINDOW;
+  console.log(`Cutoff: ${new Date(cutoff).toISOString()} (7-day window)`);
   const tempData = {};
   const hvac = [];
   let totalLines = 0, skippedOld = 0, firstTs = null, lastTs = null;
