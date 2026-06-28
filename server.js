@@ -570,3 +570,30 @@ server.listen(PORT, () => {
     setInterval(fetchBeestat, 300000);
   }
 });
+
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(`\n  ERROR: Port ${PORT} is already in use.`);
+    console.error(`  Another process (possibly a stale pm2 entry) is holding the port.`);
+    console.error(`  Fix: run "sudo pm2 list" -- if homedash appears there, run:`);
+    console.error(`       sudo pm2 delete homedash && sudo pm2 save`);
+    console.error(`  Then restart the user-level process: pm2 restart homedash\n`);
+  } else {
+    console.error('Server error:', err);
+  }
+  process.exit(1);
+});
+
+function shutdown(signal) {
+  console.log(`\n[${new Date().toLocaleTimeString()}] ${signal} received — saving data and shutting down...`);
+  saveData();
+  server.close(() => {
+    console.log('Server closed cleanly.');
+    process.exit(0);
+  });
+  // Force exit if server.close stalls (e.g. open keep-alive connections)
+  setTimeout(() => process.exit(0), 3000).unref();
+}
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT',  () => shutdown('SIGINT'));
