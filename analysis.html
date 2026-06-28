@@ -284,6 +284,16 @@
     text-align: center;
     letter-spacing: 0.1em;
   }
+
+  .dual-chart-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 36px;
+  }
+  @media (max-width: 900px) {
+    .dual-chart-grid { grid-template-columns: 1fr; }
+  }
 </style>
 </head>
 <body>
@@ -314,20 +324,38 @@
     <div id="insight-cards" class="insight-grid"></div>
 
     <div class="section-label">ROOM VS SETPOINT BY PERIOD</div>
-    <div class="chart-panel">
-      <div class="chart-header">
-        <div>
-          <div class="chart-title">TEMPERATURE DELTA FROM HEAT SETPOINT</div>
-          <div class="chart-subtitle">Positive = above setpoint &nbsp;·&nbsp; Negative = below setpoint &nbsp;·&nbsp; Target = 0</div>
+    <div class="dual-chart-grid">
+      <div class="chart-panel" style="margin-bottom:0;">
+        <div class="chart-header">
+          <div>
+            <div class="chart-title">COOLING DEVIATION</div>
+            <div class="chart-subtitle">Room temp vs cool setpoint &nbsp;·&nbsp; Negative = below target</div>
+          </div>
+        </div>
+        <div id="cool-delta-wrap" class="chart-wrap" style="height:300px;">
+          <canvas id="cool-delta-chart"></canvas>
+        </div>
+        <div id="cool-delta-empty" class="empty-msg" style="display:none;">
+          <div class="empty-icon">📊</div>
+          <div>SETPOINT TRACKING STARTING TODAY</div>
+          <div class="empty-sub">Delta data will appear once setpoint readings have been logged.</div>
         </div>
       </div>
-      <div id="delta-wrap" class="chart-wrap" style="height:300px;">
-        <canvas id="delta-chart"></canvas>
-      </div>
-      <div id="delta-empty" class="empty-msg" style="display:none;">
-        <div class="empty-icon">📊</div>
-        <div>SETPOINT TRACKING STARTING TODAY</div>
-        <div class="empty-sub">Delta comparison data will appear once the server has logged temperature readings alongside setpoint data. Check back tomorrow.</div>
+      <div class="chart-panel" style="margin-bottom:0;">
+        <div class="chart-header">
+          <div>
+            <div class="chart-title">HEATING DEVIATION</div>
+            <div class="chart-subtitle">Room temp vs heat setpoint &nbsp;·&nbsp; Positive = above target</div>
+          </div>
+        </div>
+        <div id="heat-delta-wrap" class="chart-wrap" style="height:300px;">
+          <canvas id="heat-delta-chart"></canvas>
+        </div>
+        <div id="heat-delta-empty" class="empty-msg" style="display:none;">
+          <div class="empty-icon">📊</div>
+          <div>SETPOINT TRACKING STARTING TODAY</div>
+          <div class="empty-sub">Delta data will appear once setpoint readings have been logged.</div>
+        </div>
       </div>
     </div>
 
@@ -444,27 +472,13 @@
       : '<div class="no-data">NOT ENOUGH DATA YET — CHECK BACK AFTER READINGS ACCUMULATE</div>';
   }
 
-  function renderDeltaChart(data) {
-    const wrap = document.getElementById('delta-wrap');
-    const empty = document.getElementById('delta-empty');
-    const { roomAnalysis, hasSetpointData } = data;
-
-    const rooms = Object.keys(roomAnalysis)
-      .filter(r => !EXCLUDE_ROOMS.includes(r))
-      .filter(r => WINDOWS.some(w => roomAnalysis[r][w]?.avgDelta !== null))
-      .sort();
-
-    if (!hasSetpointData || rooms.length === 0) {
-      wrap.style.display = 'none';
-      empty.style.display = 'flex';
-      return;
-    }
-
-    wrap.style.height = Math.max(300, rooms.length * 58 + 100) + 'px';
+  function buildDeltaChart(canvasId, rooms, roomAnalysis, deltaKey, xLabel, tooltipSuffix) {
+    const height = Math.max(300, rooms.length * 58 + 100) + 'px';
+    document.getElementById(canvasId).closest('.chart-wrap').style.height = height;
 
     const datasets = WINDOWS.map(w => ({
       label: WINDOW_LABELS[w],
-      data: rooms.map(r => roomAnalysis[r][w]?.avgDelta ?? null),
+      data: rooms.map(r => roomAnalysis[r][w]?.[deltaKey] ?? null),
       backgroundColor: WINDOW_COLORS[w] + '88',
       borderColor: WINDOW_COLORS[w],
       borderWidth: 1,
@@ -472,7 +486,7 @@
       borderSkipped: false,
     }));
 
-    new Chart(document.getElementById('delta-chart'), {
+    new Chart(document.getElementById(canvasId), {
       type: 'bar',
       data: { labels: rooms, datasets },
       options: {
@@ -495,14 +509,14 @@
                 const v = ctx.parsed.x;
                 if (v === null || isNaN(v)) return ` ${ctx.dataset.label}: no data`;
                 const sign = v >= 0 ? '+' : '';
-                return ` ${ctx.dataset.label}: ${sign}${v.toFixed(1)}°F vs heat setpoint`;
+                return ` ${ctx.dataset.label}: ${sign}${v.toFixed(1)}°F ${tooltipSuffix}`;
               }
             }
           }
         },
         scales: {
           x: {
-            title: { display: true, text: '°F from heat setpoint', color: '#8a96aa', font: { family: 'Share Tech Mono', size: 10 } },
+            title: { display: true, text: xLabel, color: '#8a96aa', font: { family: 'Share Tech Mono', size: 10 } },
             ticks: { color: '#8a96aa', font: { family: 'Share Tech Mono', size: 11 }, callback: v => (v > 0 ? '+' : '') + v + '°' },
             grid: { color: '#1e2330' },
             border: { color: '#1e2330' },
@@ -515,6 +529,24 @@
         }
       }
     });
+  }
+
+  function renderDeltaCharts(data) {
+    const { roomAnalysis, hasSetpointData } = data;
+
+    const rooms = Object.keys(roomAnalysis)
+      .filter(r => !EXCLUDE_ROOMS.includes(r))
+      .filter(r => WINDOWS.some(w => roomAnalysis[r][w]?.avgDelta !== null))
+      .sort();
+
+    if (!hasSetpointData || rooms.length === 0) {
+      ['cool-delta-wrap', 'heat-delta-wrap'].forEach(id => document.getElementById(id).style.display = 'none');
+      ['cool-delta-empty', 'heat-delta-empty'].forEach(id => document.getElementById(id).style.display = 'flex');
+      return;
+    }
+
+    buildDeltaChart('cool-delta-chart', rooms, roomAnalysis, 'avgCoolDelta', '°F from cool setpoint', 'vs cool setpoint');
+    buildDeltaChart('heat-delta-chart', rooms, roomAnalysis, 'avgDelta',     '°F from heat setpoint', 'vs heat setpoint');
   }
 
   function renderHvacChart(data) {
@@ -608,7 +640,7 @@
       }
 
       renderInsightCards(data);
-      renderDeltaChart(data);
+      renderDeltaCharts(data);
       renderHvacChart(data);
     } catch (e) {
       document.getElementById('loading-msg').textContent = 'FAILED TO LOAD ANALYSIS DATA';

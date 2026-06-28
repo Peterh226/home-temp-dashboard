@@ -488,9 +488,9 @@ async function computeAnalysis() {
   for (const r of tempRecords) {
     if (!acc[r.room]) {
       acc[r.room] = {
-        sleep:   { sumT: 0, sumD: 0, n: 0, nd: 0, min: Infinity, max: -Infinity },
-        evening: { sumT: 0, sumD: 0, n: 0, nd: 0, min: Infinity, max: -Infinity },
-        day:     { sumT: 0, sumD: 0, n: 0, nd: 0, min: Infinity, max: -Infinity },
+        sleep:   { sumT: 0, sumDHeat: 0, sumDCool: 0, n: 0, nd: 0, min: Infinity, max: -Infinity },
+        evening: { sumT: 0, sumDHeat: 0, sumDCool: 0, n: 0, nd: 0, min: Infinity, max: -Infinity },
+        day:     { sumT: 0, sumDHeat: 0, sumDCool: 0, n: 0, nd: 0, min: Infinity, max: -Infinity },
       };
     }
     const w = acc[r.room][getAnalysisWindow(r.timestamp)];
@@ -498,7 +498,7 @@ async function computeAnalysis() {
     if (r.temp < w.min) w.min = r.temp;
     if (r.temp > w.max) w.max = r.temp;
     const sp = getActiveSetpoint(r.timestamp);
-    if (sp) { w.sumD += r.temp - sp.heat; w.nd++; }
+    if (sp) { w.sumDHeat += r.temp - sp.heat; w.sumDCool += r.temp - sp.cool; w.nd++; }
   }
 
   const roomAnalysis = {};
@@ -508,7 +508,8 @@ async function computeAnalysis() {
       if (w.n === 0) continue;
       roomAnalysis[room][wName] = {
         avgTemp: parseFloat((w.sumT / w.n).toFixed(1)),
-        avgDelta: w.nd > 0 ? parseFloat((w.sumD / w.nd).toFixed(1)) : null,
+        avgDelta: w.nd > 0 ? parseFloat((w.sumDHeat / w.nd).toFixed(1)) : null,
+        avgCoolDelta: w.nd > 0 ? parseFloat((w.sumDCool / w.nd).toFixed(1)) : null,
         count: w.n,
         minTemp: parseFloat(w.min.toFixed(1)),
         maxTemp: parseFloat(w.max.toFixed(1)),
