@@ -38,29 +38,51 @@ function saveData() {
   }
 }
 
-function loadData() {
+async function loadData() {
+  // Restore ventState from data.json (best effort — not in ndjson)
   try {
     const saved = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
-    const cutoff = Date.now() - HISTORY_WINDOW;
-
-    // Restore room data, trimmed to last 24 hours then capped at MAX_HISTORY
-    for (const room of Object.keys(saved.roomData || {})) {
-      const filtered = saved.roomData[room].filter(r => r.timestamp >= cutoff);
-      if (filtered.length > 0) roomData[room] = filtered.slice(-MAX_HISTORY);
-    }
-
-    // Restore vent state
     Object.assign(ventState, saved.ventState || {});
-
-    // Restore hvac log, filtered to last 24 hours
-    hvacLog = (saved.hvacLog || []).filter(e => e.timestamp >= cutoff);
-
-    const roomCount = Object.keys(roomData).length;
-    const totalReadings = Object.values(roomData).reduce((s, r) => s + r.length, 0);
-    console.log(`Loaded saved data: ${roomCount} room(s), ${totalReadings} readings, ${hvacLog.length} HVAC entries (cutoff: last 24h)`);
   } catch (e) {
-    // No saved data — starting fresh
+    // No saved data — vent state starts fresh
   }
+
+  // Rebuild roomData and hvacLog from ndjson — always current, survives power cuts
+  if (!fs.existsSync(LOG_FILE)) {
+    console.log('No ndjson log found — starting fresh');
+    return;
+  }
+
+  const cutoff = Date.now() - HISTORY_WINDOW;
+  const tempData = {};
+  const hvac = [];
+
+  await new Promise((resolve) => {
+    const rl = readline.createInterface({ input: fs.createReadStream(LOG_FILE), crlfDelay: Infinity });
+    rl.on('line', (line) => {
+      if (!line.trim()) return;
+      try {
+        const entry = JSON.parse(line);
+        if (entry.timestamp < cutoff) return;
+        if (entry.type === 'temp') {
+          if (!tempData[entry.room]) tempData[entry.room] = [];
+          tempData[entry.room].push({ temp: entry.temp, timestamp: entry.timestamp });
+        } else if (entry.type === 'hvac') {
+          hvac.push({ status: entry.status, timestamp: entry.timestamp });
+        }
+      } catch (e) { /* skip malformed lines */ }
+    });
+    rl.on('close', resolve);
+  });
+
+  for (const room of Object.keys(tempData)) {
+    roomData[room] = tempData[room].slice(-MAX_HISTORY);
+  }
+  hvacLog = hvac;
+
+  const roomCount = Object.keys(roomData).length;
+  const totalReadings = Object.values(roomData).reduce((s, r) => s + r.length, 0);
+  console.log(`Rebuilt from ndjson: ${roomCount} room(s), ${totalReadings} readings, ${hvacLog.length} HVAC entries (last 24h)`);
 }
 
 setInterval(saveData, 10 * 60 * 1000); // Save every 10 minutes
@@ -551,8 +573,7 @@ async function computeAnalysis() {
 }
 
 const PORT = 3000;
-loadData();
-server.listen(PORT, () => {
+loadData().then(() => server.listen(PORT, () => {
   console.log(`\n  Temperature Dashboard running at http://localhost:${PORT}`);
   console.log(`  ESP32/ESP8266 POST endpoint: http://YOUR_PC_IP:${PORT}/data`);
   console.log(`    Payload format: { "room": "Living Room", "temp": 72.5 }\n`);
@@ -569,7 +590,7 @@ server.listen(PORT, () => {
     fetchBeestat();
     setInterval(fetchBeestat, 300000);
   }
-});
+}));
 
 server.on('error', (err) => {
   if (err.code === 'EADDRINUSE') {
