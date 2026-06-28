@@ -26,10 +26,7 @@ pm2 save             # save process list so it survives reboots
 
 > **Never use `sudo pm2`** — it registers the process under root's pm2, which conflicts with the user-level pm2 and causes port 3000 to be held by a separate process that auto-restarts. If this happens: `sudo pm2 delete homedash && sudo pm2 save`, then restart the user-level process.
 
-**After a power failure / port-in-use error:**
-- `pm2 logs homedash` will print a clear diagnostic if port 3000 is already taken on startup
-- The server handles SIGTERM/SIGINT cleanly: saves data and closes before exiting so the port is released
-- On startup, history is rebuilt from `data-log.ndjson` (7-day window), so history survives even if `data.json` is missing or corrupt
+> **After a power failure:** if port 3000 is still in use, check `pm2 logs homedash` — it prints a diagnostic with the exact fix. History recovers automatically from `data-log.ndjson` on the next clean start.
 
 **After pulling a code update:**
 ```bash

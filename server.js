@@ -21,19 +21,19 @@ const LOAD_WINDOW   =  7 * 24 * 60 * 60 * 1000; // 7 days — ndjson scan window
 // Append a reading to the permanent log file
 function logReading(room, temp, timestamp) {
   const line = JSON.stringify({ type: 'temp', room, temp, timestamp }) + '\n';
-  fs.appendFile(LOG_FILE, line, (e) => {
-    if (e) console.error('Failed to write log:', e.message);
-  });
+  try { fs.appendFileSync(LOG_FILE, line); }
+  catch (e) { console.error('Failed to write log:', e.message); }
 }
 
 function logEvent(obj) {
   const line = JSON.stringify(obj) + '\n';
-  fs.appendFile(LOG_FILE, line, e => { if (e) console.error('Log write error:', e.message); });
+  try { fs.appendFileSync(LOG_FILE, line); }
+  catch (e) { console.error('Log write error:', e.message); }
 }
 
 function saveData() {
   try {
-    fs.writeFileSync(DATA_FILE, JSON.stringify({ roomData, ventState, hvacLog }));
+    fs.writeFileSync(DATA_FILE, JSON.stringify({ ventState }));
   } catch (e) {
     console.error('Failed to save data:', e.message);
   }
@@ -92,7 +92,13 @@ async function loadData() {
   for (const room of Object.keys(tempData)) {
     roomData[room] = tempData[room].slice(-MAX_HISTORY);
   }
-  hvacLog = hvac;
+
+  // Trim hvacLog to 24h (scan window is wider to recover history after outages)
+  const hvacCutoff = Date.now() - HISTORY_WINDOW;
+  hvacLog = hvac.filter(e => e.timestamp >= hvacCutoff);
+
+  // Restore lastHvacStatus so the next Ecobee poll doesn't write a spurious transition
+  if (hvacLog.length > 0) lastHvacStatus = hvacLog[hvacLog.length - 1].status;
 
   console.log(`ndjson scan: ${totalLines} lines, ${skippedOld} skipped (too old)`);
   console.log(`  first ts: ${firstTs} (${firstTs ? new Date(firstTs).toISOString() : 'none'})`);
@@ -472,7 +478,7 @@ async function computeAnalysis() {
           if (obj.timestamp > lastTs) lastTs = obj.timestamp;
           if (type === 'temp' && obj.timestamp >= tsCutoff && obj.room && obj.temp !== undefined) {
             tempRecords.push(obj);
-          } else if (type === 'hvac' && obj.status) {
+          } else if (type === 'hvac' && obj.status && obj.timestamp >= tsCutoff) {
             hvacRecords.push(obj);
           } else if (type === 'setpoint' && obj.heat !== undefined) {
             setpointRecords.push(obj);
