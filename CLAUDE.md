@@ -26,6 +26,11 @@ pm2 save             # save process list so it survives reboots
 
 > **Never use `sudo pm2`** — it registers the process under root's pm2, which conflicts with the user-level pm2 and causes port 3000 to be held by a separate process that auto-restarts. If this happens: `sudo pm2 delete homedash && sudo pm2 save`, then restart the user-level process.
 
+**After a power failure / port-in-use error:**
+- `pm2 logs homedash` will print a clear diagnostic if port 3000 is already taken on startup
+- The server handles SIGTERM/SIGINT cleanly: saves data and closes before exiting so the port is released
+- On startup, history is rebuilt from `data-log.ndjson` (7-day window), so history survives even if `data.json` is missing or corrupt
+
 **After pulling a code update:**
 ```bash
 git pull && pm2 restart homedash
@@ -55,7 +60,10 @@ This is a two-component IoT dashboard:
 - `GET /analysis-data` — returns pre-computed analysis JSON (cached 10 min, covers last 90 days)
 - Polls **Ambient Weather API** every 5 minutes (adds "Outside" and "Weather Station Indoor" rooms)
 - Polls **Beestat/Ecobee API** every 5 minutes (adds "Ecobee: <sensor name>" rooms + `ecobeeData`)
-- Saves `roomData` + `ventState` + `hvacLog` to `data.json` every 10 minutes; reloads last 24 hours on startup
+- Saves `roomData` + `ventState` + `hvacLog` to `data.json` every 10 minutes (ventState only is reloaded from this on startup)
+- On startup, rebuilds `roomData` and `hvacLog` from `data-log.ndjson` (7-day scan window, capped at 288 readings/room) so history survives power cuts
+- Handles SIGTERM/SIGINT: saves data and closes HTTP server cleanly so port 3000 is released before exit
+- Logs a clear diagnostic to `pm2 logs` if port 3000 is already in use (EADDRINUSE)
 - Appends every reading to `data-log.ndjson` as `{ type: 'temp', room, temp, timestamp }`
 - Also appends to `data-log.ndjson` on HVAC transitions: `{ type: 'hvac', status, timestamp }`
 - Also appends to `data-log.ndjson` on setpoint changes: `{ type: 'setpoint', heat, cool, program, timestamp }`
@@ -73,7 +81,7 @@ This is a two-component IoT dashboard:
 **Analysis page (`analysis.html`)** — served at `/analysis`:
 - Key insight cards: Bedroom sleep hours (11PM–8AM), Living Room evening (6–11PM), She Shack all hours
 - Each card shows avg temp, delta from heat setpoint, reading count, min/max range
-- Horizontal grouped bar chart: all rooms × time window (sleep/evening/day) vs heat setpoint delta
+- Two side-by-side delta charts: cooling deviation (room vs cool setpoint) on the left, heating deviation (room vs heat setpoint) on the right; each broken down by time window (sleep/evening/day)
 - HVAC response chart: avg minutes per room to reach setpoint after heat/cool kicks on
 - Coverage strip in header shows data age, reading count, room count
 - Delta and HVAC charts show "accumulating" message until ndjson has setpoint/hvac events
