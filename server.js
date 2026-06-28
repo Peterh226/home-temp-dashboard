@@ -57,17 +57,22 @@ async function loadData() {
   console.log(`Reading ndjson log (${(stat.size / 1024).toFixed(0)} KB)...`);
 
   const cutoff = Date.now() - HISTORY_WINDOW;
+  console.log(`Cutoff: ${new Date(cutoff).toISOString()} (${cutoff})`);
   const tempData = {};
   const hvac = [];
+  let totalLines = 0, skippedOld = 0, firstTs = null, lastTs = null;
 
   await new Promise((resolve) => {
     const stream = fs.createReadStream(LOG_FILE);
     const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
     rl.on('line', (line) => {
       if (!line.trim()) return;
+      totalLines++;
       try {
         const entry = JSON.parse(line);
-        if (entry.timestamp < cutoff) return;
+        if (firstTs === null) firstTs = entry.timestamp;
+        lastTs = entry.timestamp;
+        if (entry.timestamp < cutoff) { skippedOld++; return; }
         if (entry.type === 'temp') {
           if (!tempData[entry.room]) tempData[entry.room] = [];
           tempData[entry.room].push({ temp: entry.temp, timestamp: entry.timestamp });
@@ -88,6 +93,9 @@ async function loadData() {
   }
   hvacLog = hvac;
 
+  console.log(`ndjson scan: ${totalLines} lines, ${skippedOld} skipped (too old)`);
+  console.log(`  first ts: ${firstTs} (${firstTs ? new Date(firstTs).toISOString() : 'none'})`);
+  console.log(`  last  ts: ${lastTs} (${lastTs ? new Date(lastTs).toISOString() : 'none'})`);
   const roomCount = Object.keys(roomData).length;
   const totalReadings = Object.values(roomData).reduce((s, r) => s + r.length, 0);
   console.log(`Rebuilt from ndjson: ${roomCount} room(s), ${totalReadings} readings, ${hvacLog.length} HVAC entries (last 24h)`);
