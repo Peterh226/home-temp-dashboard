@@ -53,12 +53,16 @@ async function loadData() {
     return;
   }
 
+  const stat = fs.statSync(LOG_FILE);
+  console.log(`Reading ndjson log (${(stat.size / 1024).toFixed(0)} KB)...`);
+
   const cutoff = Date.now() - HISTORY_WINDOW;
   const tempData = {};
   const hvac = [];
 
   await new Promise((resolve) => {
-    const rl = readline.createInterface({ input: fs.createReadStream(LOG_FILE), crlfDelay: Infinity });
+    const stream = fs.createReadStream(LOG_FILE);
+    const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
     rl.on('line', (line) => {
       if (!line.trim()) return;
       try {
@@ -73,6 +77,10 @@ async function loadData() {
       } catch (e) { /* skip malformed lines */ }
     });
     rl.on('close', resolve);
+    stream.on('error', (err) => {
+      console.error('Error reading ndjson log:', err.message);
+      resolve();
+    });
   });
 
   for (const room of Object.keys(tempData)) {
@@ -574,7 +582,9 @@ async function computeAnalysis() {
 }
 
 const PORT = 3000;
-loadData().then(() => server.listen(PORT, () => {
+loadData().catch(err => {
+  console.error('loadData failed, starting with empty history:', err.message);
+}).then(() => server.listen(PORT, () => {
   console.log(`\n  Temperature Dashboard running at http://localhost:${PORT}`);
   console.log(`  ESP32/ESP8266 POST endpoint: http://YOUR_PC_IP:${PORT}/data`);
   console.log(`    Payload format: { "room": "Living Room", "temp": 72.5 }\n`);
