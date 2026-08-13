@@ -24,9 +24,15 @@ pm2 startup          # follow the printed command to enable auto-start on boot
 pm2 save             # save process list so it survives reboots
 ```
 
-> **Never use `sudo pm2`** — it registers the process under root's pm2, which conflicts with the user-level pm2 and causes port 3000 to be held by a separate process that auto-restarts. If this happens: `sudo pm2 delete homedash && sudo pm2 save`, then restart the user-level process.
+> **Never use `sudo pm2`, and never run `setup-rpi.sh` with `sudo`** — either one registers a second pm2 daemon under root (`~root/.pm2`), which silently races the normal user's pm2 for port 3000 on every reboot. `setup-rpi.sh` now refuses to run as root (checks `id -u` at the top) specifically to prevent this. If a root-owned `homedash` ever shows up anyway (check `sudo pm2 list`):
+> ```bash
+> sudo pm2 delete homedash
+> sudo pm2 save --force   # --force is required if this empties root's list, or the stale entry isn't actually cleared
+> sudo grep -i homedash ~root/.pm2/dump.pm2   # should print nothing
+> ```
+> Then confirm the real process is still fine with a plain (non-sudo) `pm2 list` — don't assume it is just because `sudo pm2 list` looks right. If it's missing, restore it: `cd ~/home-temp-dashboard && pm2 start server.js --name homedash && pm2 save`.
 
-> **After a power failure:** if port 3000 is still in use, check `pm2 logs homedash` — it prints a diagnostic with the exact fix. History recovers automatically from `data-log.ndjson` on the next clean start.
+> **After a power failure:** if port 3000 is still in use, check `pm2 logs homedash` — it prints a diagnostic with the exact fix. History recovers automatically from `data-log.ndjson` on the next clean start. This exact scenario (root's pm2 winning the boot race, real `homedash` stuck in an infinite crash-restart loop) happened for real on 2026-08-13, traced back to someone once running `sudo ./setup-rpi.sh`; see the `sudo pm2`/`setup-rpi.sh` warning above for the fix and prevention.
 
 **After pulling a code update:**
 ```bash
