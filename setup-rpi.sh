@@ -2,6 +2,20 @@
 # setup-rpi.sh — one-shot setup for HomeTempDashboard on a fresh Raspberry Pi 4
 set -euo pipefail
 
+# Do NOT run this script itself with sudo. Individual steps below already
+# elevate with sudo where needed (apt, rclone install). Running the whole
+# script as root installs a second, separate pm2 daemon under /root/.pm2
+# that silently races the normal user's pm2 for port 3000 on every reboot —
+# this has already caused a real outage where the dashboard got stuck in an
+# infinite crash-restart loop after a power failure until someone manually
+# SSHed in to clear it. Run as: ./setup-rpi.sh
+if [ "$(id -u)" -eq 0 ]; then
+  echo "ERROR: do not run this script with sudo / as root." >&2
+  echo "Individual steps already elevate with sudo where needed." >&2
+  echo "Run as your normal user: ./setup-rpi.sh" >&2
+  exit 1
+fi
+
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
